@@ -175,7 +175,7 @@ class ProtoReader {
 //   fixed32 emoji = 8;
 // }
 
-export function encodeData({ portnum, payload, wantResponse = false }) {
+export function encodeData({ portnum, payload, wantResponse = false, bitfield = 0 }) {
   const parts = [];
 
   // Field 1: portnum (varint)
@@ -190,6 +190,12 @@ export function encodeData({ portnum, payload, wantResponse = false }) {
   if (wantResponse) {
     parts.push(encodeTag(3, VARINT));
     parts.push(encodeVarint(1));
+  }
+
+  // Field 9: bitfield (varint) - indicates message capabilities
+  if (bitfield) {
+    parts.push(encodeTag(9, VARINT));
+    parts.push(encodeVarint(bitfield));
   }
 
   return Buffer.concat(parts);
@@ -254,7 +260,9 @@ export function encodeMeshPacket({
   id,
   channel = 0,
   hopLimit = 3,
+  hopStart = 0,
   wantAck = false,
+  viaMqtt = false,
   encrypted,
   decoded,
 }) {
@@ -268,7 +276,7 @@ export function encodeMeshPacket({
   parts.push(encodeTag(2, FIXED32));
   parts.push(encodeFixed32(to));
 
-  // Field 3: channel (varint)
+  // Field 3: channel (varint) - hash of channel name XOR key
   if (channel !== 0) {
     parts.push(encodeTag(3, VARINT));
     parts.push(encodeVarint(channel));
@@ -290,6 +298,7 @@ export function encodeMeshPacket({
   parts.push(encodeFixed32(id));
 
   // Field 9: hop_limit (varint)
+  // Note: For public MQTT broker, hop_limit should be 0 (zero-hop policy)
   if (hopLimit !== 0) {
     parts.push(encodeTag(9, VARINT));
     parts.push(encodeVarint(hopLimit));
@@ -299,6 +308,18 @@ export function encodeMeshPacket({
   if (wantAck) {
     parts.push(encodeTag(10, VARINT));
     parts.push(encodeVarint(1));
+  }
+
+  // Field 14: via_mqtt (bool) - indicates message came from MQTT gateway
+  if (viaMqtt) {
+    parts.push(encodeTag(14, VARINT));
+    parts.push(encodeVarint(1));
+  }
+
+  // Field 15: hop_start (varint) - original hop count for routing metrics
+  if (hopStart !== 0) {
+    parts.push(encodeTag(15, VARINT));
+    parts.push(encodeVarint(hopStart));
   }
 
   return Buffer.concat(parts);
@@ -467,6 +488,565 @@ export function decodeServiceEnvelope(buffer) {
       break;
     }
   }
+
+  return result;
+}
+
+// --- Position message (from POSITION_APP) ---
+// message Position {
+//   sfixed32 latitude_i = 1;   // degrees * 1e7
+//   sfixed32 longitude_i = 2;  // degrees * 1e7
+//   int32 altitude = 3;        // meters
+//   fixed32 time = 4;          // seconds since 1970
+//   ...
+// }
+
+export function decodePosition(buffer) {
+  const reader = new ProtoReader(buffer);
+  const result = {
+    latitudeI: 0,
+    longitudeI: 0,
+    altitude: 0,
+    time: 0,
+    satsInView: 0,
+    groundSpeed: 0,
+    groundTrack: 0,
+    precisionBits: 0,
+  };
+
+  while (reader.hasMore()) {
+    const tag = reader.readVarint();
+    const fieldNumber = tag >>> 3;
+    const wireType = tag & 0x7;
+
+    try {
+      switch (fieldNumber) {
+        case 1: // latitude_i (sfixed32)
+          result.latitudeI = reader.buffer.readInt32LE(reader.pos);
+          reader.pos += 4;
+          break;
+        case 2: // longitude_i (sfixed32)
+          result.longitudeI = reader.buffer.readInt32LE(reader.pos);
+          reader.pos += 4;
+          break;
+        case 3: // altitude (int32)
+          result.altitude = reader.readVarint();
+          break;
+        case 4: // time (fixed32)
+          result.time = reader.readFixed32();
+          break;
+        case 8: // sats_in_view
+          result.satsInView = reader.readVarint();
+          break;
+        case 10: // ground_speed
+          result.groundSpeed = reader.readVarint();
+          break;
+        case 11: // ground_track
+          result.groundTrack = reader.readVarint();
+          break;
+        case 12: // precision_bits
+          result.precisionBits = reader.readVarint();
+          break;
+        default:
+          reader.skipField(wireType);
+      }
+    } catch (e) {
+      break;
+    }
+  }
+
+  // Convert to decimal degrees
+  result.latitude = result.latitudeI / 1e7;
+  result.longitude = result.longitudeI / 1e7;
+
+  return result;
+}
+
+// --- User/NodeInfo message (from NODEINFO_APP) ---
+// message User {
+//   string id = 1;
+//   string long_name = 2;
+//   string short_name = 3;
+//   bytes macaddr = 4;
+//   HardwareModel hw_model = 5;
+//   ...
+// }
+
+export function decodeUser(buffer) {
+  const reader = new ProtoReader(buffer);
+  const result = {
+    id: '',
+    longName: '',
+    shortName: '',
+    hwModel: 0,
+    role: 0,
+  };
+
+  while (reader.hasMore()) {
+    const tag = reader.readVarint();
+    const fieldNumber = tag >>> 3;
+    const wireType = tag & 0x7;
+
+    try {
+      switch (fieldNumber) {
+        case 1: // id
+          const idLen = reader.readVarint();
+          result.id = reader.readString(idLen);
+          break;
+        case 2: // long_name
+          const lnLen = reader.readVarint();
+          result.longName = reader.readString(lnLen);
+          break;
+        case 3: // short_name
+          const snLen = reader.readVarint();
+          result.shortName = reader.readString(snLen);
+          break;
+        case 5: // hw_model
+          result.hwModel = reader.readVarint();
+          break;
+        case 7: // role
+          result.role = reader.readVarint();
+          break;
+        default:
+          reader.skipField(wireType);
+      }
+    } catch (e) {
+      break;
+    }
+  }
+
+  return result;
+}
+
+// --- Telemetry message (from TELEMETRY_APP) ---
+// message Telemetry {
+//   fixed32 time = 1;
+//   oneof variant {
+//     DeviceMetrics device_metrics = 2;
+//     EnvironmentMetrics environment_metrics = 3;
+//   }
+// }
+
+export function decodeTelemetry(buffer) {
+  const reader = new ProtoReader(buffer);
+  const result = {
+    time: 0,
+    deviceMetrics: null,
+    environmentMetrics: null,
+  };
+
+  while (reader.hasMore()) {
+    const tag = reader.readVarint();
+    const fieldNumber = tag >>> 3;
+    const wireType = tag & 0x7;
+
+    try {
+      switch (fieldNumber) {
+        case 1: // time
+          result.time = reader.readFixed32();
+          break;
+        case 2: // device_metrics
+          const dmLen = reader.readVarint();
+          result.deviceMetrics = decodeDeviceMetrics(reader.readBytes(dmLen));
+          break;
+        case 3: // environment_metrics
+          const emLen = reader.readVarint();
+          result.environmentMetrics = decodeEnvironmentMetrics(reader.readBytes(emLen));
+          break;
+        default:
+          reader.skipField(wireType);
+      }
+    } catch (e) {
+      break;
+    }
+  }
+
+  return result;
+}
+
+function decodeDeviceMetrics(buffer) {
+  const reader = new ProtoReader(buffer);
+  const result = {
+    batteryLevel: 0,
+    voltage: 0,
+    channelUtilization: 0,
+    airUtilTx: 0,
+    uptimeSeconds: 0,
+  };
+
+  while (reader.hasMore()) {
+    const tag = reader.readVarint();
+    const fieldNumber = tag >>> 3;
+    const wireType = tag & 0x7;
+
+    try {
+      switch (fieldNumber) {
+        case 1: // battery_level
+          result.batteryLevel = reader.readVarint();
+          break;
+        case 2: // voltage (float)
+          result.voltage = reader.buffer.readFloatLE(reader.pos);
+          reader.pos += 4;
+          break;
+        case 3: // channel_utilization (float)
+          result.channelUtilization = reader.buffer.readFloatLE(reader.pos);
+          reader.pos += 4;
+          break;
+        case 4: // air_util_tx (float)
+          result.airUtilTx = reader.buffer.readFloatLE(reader.pos);
+          reader.pos += 4;
+          break;
+        case 5: // uptime_seconds
+          result.uptimeSeconds = reader.readVarint();
+          break;
+        default:
+          reader.skipField(wireType);
+      }
+    } catch (e) {
+      break;
+    }
+  }
+
+  return result;
+}
+
+function decodeEnvironmentMetrics(buffer) {
+  const reader = new ProtoReader(buffer);
+  const result = {
+    temperature: 0,
+    relativeHumidity: 0,
+    barometricPressure: 0,
+    gasResistance: 0,
+  };
+
+  while (reader.hasMore()) {
+    const tag = reader.readVarint();
+    const fieldNumber = tag >>> 3;
+    const wireType = tag & 0x7;
+
+    try {
+      switch (fieldNumber) {
+        case 1: // temperature (float)
+          result.temperature = reader.buffer.readFloatLE(reader.pos);
+          reader.pos += 4;
+          break;
+        case 2: // relative_humidity (float)
+          result.relativeHumidity = reader.buffer.readFloatLE(reader.pos);
+          reader.pos += 4;
+          break;
+        case 3: // barometric_pressure (float)
+          result.barometricPressure = reader.buffer.readFloatLE(reader.pos);
+          reader.pos += 4;
+          break;
+        case 4: // gas_resistance (float)
+          result.gasResistance = reader.buffer.readFloatLE(reader.pos);
+          reader.pos += 4;
+          break;
+        default:
+          reader.skipField(wireType);
+      }
+    } catch (e) {
+      break;
+    }
+  }
+
+  return result;
+}
+
+// --- Routing message (from ROUTING_APP) ---
+// message Routing {
+//   oneof variant {
+//     RouteDiscovery route_request = 1;
+//     RouteDiscovery route_reply = 2;
+//     Error error_reason = 3;
+//   }
+// }
+
+export function decodeRouting(buffer) {
+  const reader = new ProtoReader(buffer);
+  const result = {
+    errorReason: 0,
+    routeRequest: null,
+    routeReply: null,
+  };
+
+  const errorNames = {
+    0: 'NONE',
+    1: 'NO_ROUTE',
+    2: 'GOT_NAK',
+    3: 'TIMEOUT',
+    4: 'NO_INTERFACE',
+    5: 'MAX_RETRANSMIT',
+    6: 'NO_CHANNEL',
+    7: 'TOO_LARGE',
+    8: 'NO_RESPONSE',
+    9: 'DUTY_CYCLE_LIMIT',
+    32: 'BAD_REQUEST',
+    33: 'NOT_AUTHORIZED',
+  };
+
+  while (reader.hasMore()) {
+    const tag = reader.readVarint();
+    const fieldNumber = tag >>> 3;
+    const wireType = tag & 0x7;
+
+    try {
+      switch (fieldNumber) {
+        case 1: // route_request
+          const rrLen = reader.readVarint();
+          result.routeRequest = decodeRouteDiscovery(reader.readBytes(rrLen));
+          break;
+        case 2: // route_reply
+          const rpLen = reader.readVarint();
+          result.routeReply = decodeRouteDiscovery(reader.readBytes(rpLen));
+          break;
+        case 3: // error_reason
+          result.errorReason = reader.readVarint();
+          result.errorName = errorNames[result.errorReason] || `ERROR_${result.errorReason}`;
+          break;
+        default:
+          reader.skipField(wireType);
+      }
+    } catch (e) {
+      break;
+    }
+  }
+
+  return result;
+}
+
+function decodeRouteDiscovery(buffer) {
+  const reader = new ProtoReader(buffer);
+  const result = {
+    route: [],
+    snrTowards: [],
+    routeBack: [],
+    snrBack: [],
+  };
+
+  while (reader.hasMore()) {
+    const tag = reader.readVarint();
+    const fieldNumber = tag >>> 3;
+    const wireType = tag & 0x7;
+
+    try {
+      switch (fieldNumber) {
+        case 1: // route (repeated fixed32)
+          if (wireType === 2) {
+            // packed
+            const len = reader.readVarint();
+            const end = reader.pos + len;
+            while (reader.pos < end) {
+              result.route.push(reader.readFixed32());
+            }
+          } else {
+            result.route.push(reader.readFixed32());
+          }
+          break;
+        case 2: // snr_towards (repeated int8)
+          if (wireType === 2) {
+            const len = reader.readVarint();
+            const end = reader.pos + len;
+            while (reader.pos < end) {
+              result.snrTowards.push(reader.buffer.readInt8(reader.pos++));
+            }
+          } else {
+            result.snrTowards.push(reader.readVarint());
+          }
+          break;
+        case 3: // route_back (repeated fixed32)
+          if (wireType === 2) {
+            const len = reader.readVarint();
+            const end = reader.pos + len;
+            while (reader.pos < end) {
+              result.routeBack.push(reader.readFixed32());
+            }
+          } else {
+            result.routeBack.push(reader.readFixed32());
+          }
+          break;
+        case 4: // snr_back (repeated int8)
+          if (wireType === 2) {
+            const len = reader.readVarint();
+            const end = reader.pos + len;
+            while (reader.pos < end) {
+              result.snrBack.push(reader.buffer.readInt8(reader.pos++));
+            }
+          } else {
+            result.snrBack.push(reader.readVarint());
+          }
+          break;
+        default:
+          reader.skipField(wireType);
+      }
+    } catch (e) {
+      break;
+    }
+  }
+
+  return result;
+}
+
+// --- NeighborInfo message (from NEIGHBORINFO_APP) ---
+export function decodeNeighborInfo(buffer) {
+  const reader = new ProtoReader(buffer);
+  const result = {
+    nodeId: 0,
+    lastSentById: 0,
+    nodeBroadcastIntervalSecs: 0,
+    neighbors: [],
+  };
+
+  while (reader.hasMore()) {
+    const tag = reader.readVarint();
+    const fieldNumber = tag >>> 3;
+    const wireType = tag & 0x7;
+
+    try {
+      switch (fieldNumber) {
+        case 1: // node_id
+          result.nodeId = reader.readVarint();
+          break;
+        case 2: // last_sent_by_id
+          result.lastSentById = reader.readVarint();
+          break;
+        case 3: // node_broadcast_interval_secs
+          result.nodeBroadcastIntervalSecs = reader.readVarint();
+          break;
+        case 4: // neighbors (repeated Neighbor)
+          const nLen = reader.readVarint();
+          result.neighbors.push(decodeNeighbor(reader.readBytes(nLen)));
+          break;
+        default:
+          reader.skipField(wireType);
+      }
+    } catch (e) {
+      break;
+    }
+  }
+
+  return result;
+}
+
+function decodeNeighbor(buffer) {
+  const reader = new ProtoReader(buffer);
+  const result = {
+    nodeId: 0,
+    snr: 0,
+  };
+
+  while (reader.hasMore()) {
+    const tag = reader.readVarint();
+    const fieldNumber = tag >>> 3;
+    const wireType = tag & 0x7;
+
+    try {
+      switch (fieldNumber) {
+        case 1: // node_id
+          result.nodeId = reader.readVarint();
+          break;
+        case 2: // snr
+          result.snr = reader.buffer.readFloatLE(reader.pos);
+          reader.pos += 4;
+          break;
+        default:
+          reader.skipField(wireType);
+      }
+    } catch (e) {
+      break;
+    }
+  }
+
+  return result;
+}
+
+// --- Traceroute message (from TRACEROUTE_APP) ---
+export function decodeTraceroute(buffer) {
+  // Traceroute uses RouteDiscovery format
+  return decodeRouteDiscovery(buffer);
+}
+
+// --- MapReport message (from MAP_REPORT_APP) ---
+export function decodeMapReport(buffer) {
+  const reader = new ProtoReader(buffer);
+  const result = {
+    longName: '',
+    shortName: '',
+    role: 0,
+    hwModel: 0,
+    firmwareVersion: '',
+    region: 0,
+    modemPreset: 0,
+    hasDefaultChannel: false,
+    latitudeI: 0,
+    longitudeI: 0,
+    altitude: 0,
+    positionPrecision: 0,
+    numOnlineLocalNodes: 0,
+  };
+
+  while (reader.hasMore()) {
+    const tag = reader.readVarint();
+    const fieldNumber = tag >>> 3;
+    const wireType = tag & 0x7;
+
+    try {
+      switch (fieldNumber) {
+        case 1: // long_name
+          const lnLen = reader.readVarint();
+          result.longName = reader.readString(lnLen);
+          break;
+        case 2: // short_name
+          const snLen = reader.readVarint();
+          result.shortName = reader.readString(snLen);
+          break;
+        case 3: // role
+          result.role = reader.readVarint();
+          break;
+        case 4: // hw_model
+          result.hwModel = reader.readVarint();
+          break;
+        case 5: // firmware_version
+          const fvLen = reader.readVarint();
+          result.firmwareVersion = reader.readString(fvLen);
+          break;
+        case 6: // region
+          result.region = reader.readVarint();
+          break;
+        case 7: // modem_preset
+          result.modemPreset = reader.readVarint();
+          break;
+        case 8: // has_default_channel
+          result.hasDefaultChannel = reader.readVarint() !== 0;
+          break;
+        case 9: // latitude_i
+          result.latitudeI = reader.buffer.readInt32LE(reader.pos);
+          reader.pos += 4;
+          break;
+        case 10: // longitude_i
+          result.longitudeI = reader.buffer.readInt32LE(reader.pos);
+          reader.pos += 4;
+          break;
+        case 11: // altitude
+          result.altitude = reader.readVarint();
+          break;
+        case 12: // position_precision
+          result.positionPrecision = reader.readVarint();
+          break;
+        case 13: // num_online_local_nodes
+          result.numOnlineLocalNodes = reader.readVarint();
+          break;
+        default:
+          reader.skipField(wireType);
+      }
+    } catch (e) {
+      break;
+    }
+  }
+
+  // Convert to decimal degrees
+  result.latitude = result.latitudeI / 1e7;
+  result.longitude = result.longitudeI / 1e7;
 
   return result;
 }

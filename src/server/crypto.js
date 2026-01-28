@@ -1,5 +1,24 @@
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 
+/**
+ * Generate channel hash from channel name and key
+ * Used in MeshPacket.channel field to identify which key to use for decryption
+ * Based on: https://github.com/meshtastic/firmware/blob/master/src/mesh/Channels.cpp
+ */
+export function generateChannelHash(channelName, keyBase64) {
+  const keyBytes = Buffer.from(keyBase64, 'base64');
+  const nameBytes = Buffer.from(channelName, 'utf-8');
+
+  // XOR all bytes together
+  const xorHash = (bytes) => {
+    let result = 0;
+    for (const byte of bytes) result ^= byte;
+    return result;
+  };
+
+  return xorHash(nameBytes) ^ xorHash(keyBytes);
+}
+
 // Meshtastic uses AES-CTR with a specific nonce structure
 // Based on: https://github.com/meshtastic/firmware/blob/master/src/mesh/CryptoEngine.cpp
 //

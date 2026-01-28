@@ -41,3 +41,26 @@ body {
 .animate-pulse {
   animation: pulse 2s infinite;
 }
+
+/* Activity log entries */
+#activity-log > div {
+  transition: opacity 0.2s;
+}
+
+#activity-log > div:hover {
+  opacity: 0.9;
+}
+
+/* Ensure full height on desktop */
+@media (min-width: 1024px) {
+  body {
+    height: 100vh;
+    overflow: hidden;
+  }
+}
+
+/* Filter button active state */
+.filter-active {
+  background-color: #374151 !important;
+  color: white !important;
+}

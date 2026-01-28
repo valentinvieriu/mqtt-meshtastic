@@ -1,13 +1,20 @@
 import { WebSocketServer } from 'ws';
 import { createHttpServer } from './http-server.js';
 import { createMqttClient } from './mqtt-client.js';
-import { encrypt, decrypt, generatePacketId } from './crypto.js';
+import { encrypt, decrypt, generatePacketId, generateChannelHash } from './crypto.js';
 import { config } from './config.js';
 import {
   encodeServiceEnvelope,
   decodeServiceEnvelope,
   encodeData,
   decodeData,
+  decodePosition,
+  decodeUser,
+  decodeTelemetry,
+  decodeRouting,
+  decodeNeighborInfo,
+  decodeTraceroute,
+  decodeMapReport,
   PortNum,
   parseNodeId,
   formatNodeId,
@@ -17,15 +24,29 @@ import {
 const PORT_NAMES = {
   0: 'UNKNOWN',
   1: 'TEXT',
+  2: 'REMOTE_HARDWARE',
   3: 'POSITION',
   4: 'NODEINFO',
   5: 'ROUTING',
   6: 'ADMIN',
   7: 'TEXT_COMPRESSED',
   8: 'WAYPOINT',
+  9: 'AUDIO',
+  10: 'DETECTION_SENSOR',
+  32: 'REPLY',
+  33: 'IP_TUNNEL',
+  64: 'SERIAL',
+  65: 'STORE_FORWARD',
+  66: 'RANGE_TEST',
   67: 'TELEMETRY',
+  68: 'ZPS',
+  69: 'SIMULATOR',
   70: 'TRACEROUTE',
+  71: 'NEIGHBORINFO',
+  72: 'ATAK_PLUGIN',
   73: 'MAP_REPORT',
+  256: 'PRIVATE',
+  257: 'ATAK_FORWARDER',
 };
 
 // Track connected WebSocket clients
@@ -59,6 +80,7 @@ function handleMqttMessage(topic, rawMessage) {
     let decodedText = null;
     let portnum = -1; // Use -1 for "unknown/encrypted"
     let decryptionStatus = 'none';
+    let decodedPayload = null; // For Position, Telemetry, NodeInfo
 
     // Try to decrypt if encrypted
     if (packet.encrypted && packet.encrypted.length > 0) {
@@ -75,7 +97,9 @@ function handleMqttMessage(topic, rawMessage) {
         portnum = data.portnum;
         decryptionStatus = 'success';
 
-        if (data.portnum === PortNum.TEXT_MESSAGE_APP) {
+        // Decode payload based on portnum
+        decodedPayload = decodePayloadByType(portnum, data.payload);
+        if (portnum === PortNum.TEXT_MESSAGE_APP) {
           decodedText = data.payload.toString('utf-8');
         }
 
@@ -89,6 +113,7 @@ function handleMqttMessage(topic, rawMessage) {
     } else if (packet.decoded) {
       portnum = packet.decoded.portnum;
       decryptionStatus = 'plaintext';
+      decodedPayload = decodePayloadByType(portnum, packet.decoded.payload);
       if (packet.decoded.portnum === PortNum.TEXT_MESSAGE_APP) {
         decodedText = packet.decoded.payload.toString('utf-8');
       }
@@ -106,9 +131,13 @@ function handleMqttMessage(topic, rawMessage) {
       to: formatNodeId(packet.to),
       packetId: packet.id,
       hopLimit: packet.hopLimit,
+      hopStart: packet.hopStart,
+      rxTime: packet.rxTime,
+      viaMqtt: packet.viaMqtt,
       portnum,
       portName: PORT_NAMES[portnum] || (portnum === -1 ? 'ENCRYPTED' : `PORT_${portnum}`),
       text: decodedText,
+      payload: decodedPayload,
       decryptionStatus,
       timestamp: Date.now(),
     });
@@ -123,6 +152,33 @@ function handleMqttMessage(topic, rawMessage) {
       size: rawMessage.length,
       timestamp: Date.now(),
     });
+  }
+}
+
+// Decode payload based on message type
+function decodePayloadByType(portnum, payload) {
+  try {
+    switch (portnum) {
+      case PortNum.POSITION_APP:
+        return decodePosition(payload);
+      case PortNum.NODEINFO_APP:
+        return decodeUser(payload);
+      case PortNum.TELEMETRY_APP:
+        return decodeTelemetry(payload);
+      case PortNum.ROUTING_APP:
+        return decodeRouting(payload);
+      case PortNum.NEIGHBORINFO_APP:
+        return decodeNeighborInfo(payload);
+      case PortNum.TRACEROUTE_APP:
+        return decodeTraceroute(payload);
+      case PortNum.MAP_REPORT_APP:
+        return decodeMapReport(payload);
+      default:
+        return null;
+    }
+  } catch (err) {
+    console.error(`[MQTT] Failed to decode portnum ${portnum}:`, err.message);
+    return null;
   }
 }
 
@@ -188,20 +244,25 @@ async function handleClientMessage(ws, msg) {
       const fromNode = parseNodeId(gatewayId);
       const toNode = parseNodeId(to);
       const packetId = generatePacketId();
+      const effectiveKey = key || config.meshtastic.defaultKey;
 
       // Build topic: msh/EU_868/2/e/LongFast/!gateway
       const topic = `${config.meshtastic.rootTopic}/${channel}/${gatewayId}`;
+
+      // Compute channel hash (XOR of channel name and key bytes)
+      const channelHash = generateChannelHash(channel, effectiveKey);
 
       // Create Data message (portnum 1 = TEXT_MESSAGE_APP)
       const dataMessage = encodeData({
         portnum: PortNum.TEXT_MESSAGE_APP,
         payload: Buffer.from(text, 'utf-8'),
+        bitfield: 1, // Indicates sender capabilities
       });
 
       // Encrypt the Data message
       const encryptedData = encrypt(
         dataMessage,
-        key || config.meshtastic.defaultKey,
+        effectiveKey,
         packetId,
         fromNode
       );
@@ -212,9 +273,11 @@ async function handleClientMessage(ws, msg) {
           from: fromNode,
           to: toNode,
           id: packetId,
-          channel: 0, // Primary channel
-          hopLimit: 3,
+          channel: channelHash, // Hash of channel name XOR key
+          hopLimit: 0, // Zero-hop policy for public MQTT broker
+          hopStart: 0, // Original hop count (0 = won't propagate beyond direct nodes)
           wantAck: false,
+          viaMqtt: true, // Indicates message came from MQTT gateway
           encrypted: encryptedData,
         },
         channelId: channel,
