@@ -1,0 +1,5 @@
+.DS_Store
+node_modules/
+ai_docs/repomix-*.md
+.env
+*.log

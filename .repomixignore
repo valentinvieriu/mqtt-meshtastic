@@ -1,0 +1,15 @@
+# ============================================
+# What gets EXCLUDED from repomix output
+# ============================================
+# Note: Only 3 files are explicitly included via repomix.config.json:
+# - ai_docs/assets/002-Moving-Workloads.architecture.drawio
+# - ai_docs/prompt.md
+# - output/o1.md
+
+# Standard excludes (safety net)
+node_modules/
+.git/
+.DS_Store
+*.log
+.env
+.env.*

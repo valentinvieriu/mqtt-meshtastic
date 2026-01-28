@@ -1,0 +1,15 @@
+{
+  "name": "mqtt-meshtastic",
+  "version": "2.0.0",
+  "description": "Meshtastic MQTT client for sending messages via mqtt.meshtastic.org",
+  "type": "module",
+  "main": "src/server/index.js",
+  "scripts": {
+    "start": "node src/server/index.js",
+    "dev": "node --watch src/server/index.js"
+  },
+  "dependencies": {
+    "mqtt": "^5.10.0",
+    "ws": "^8.18.0"
+  }
+}

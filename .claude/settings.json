@@ -1,0 +1,82 @@
+{
+  "env": {
+    "NODE_ENV": "development"
+  },
+  "permissions": {
+    "allow": [
+      "Write",
+      "Edit",
+      "MultiEdit",
+
+      "WebFetch",
+      "WebSearch",
+
+      "Bash(rg:*)",
+      "Bash(fd:*)",
+      "Bash(bat --style=plain --paging=never:*)",
+      "Bash(eza:*)",
+      "Bash(jq:*)",
+      "Bash(yq:*)",
+      "Bash(delta:*)",
+
+      "Bash(git status:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git log:*)",
+      "Bash(git push:*)",
+      "Bash(git diff:*)",
+      "Bash(git show:*)",
+
+      "Bash(npm install:*)",
+      "Bash(npm run:*)",
+      "Bash(npm test:*)",
+
+      "Bash(wrangler:*)",
+      "Bash(mkdir:*)",
+      "Bash(mv:*)",
+      "Bash(cp:*)",
+
+      "ExitPlanMode"
+    ],
+    "ask": ["Bash(git commit --amend:*)"],
+    "deny": [
+      "Bash(awk:*)",
+      "Bash(rm:*)",
+      "Bash(sudo:*)",
+
+      "Bash(curl:*)",
+      "Bash(sh:*)",
+      "Bash(bash:*)",
+      "Bash(zsh:*)",
+
+      "Bash(chmod +x:*)",
+      "Bash(chown:*)",
+      "Bash(chgrp:*)",
+
+      "Bash(npm install -g:*)",
+      "Bash(npm publish:*)",
+      "Bash(pnpm publish:*)",
+      "Bash(yarn publish:*)",
+
+      "Bash(git reset --hard:*)",
+      "Bash(git clean -fdx:*)",
+      "Bash(git push --force:*)",
+      "Bash(git push -f:*)",
+      "Bash(git push --force-with-lease:*)",
+
+      "Bash(dd:*)",
+      "Bash(mkfs:*)",
+      "Bash(mount:*)",
+      "Bash(umount:*)",
+      "Bash(truncate:*)",
+      "Bash(fallocate:*)",
+      "Bash(shred:*)",
+      "Bash(iptables:*)",
+      "Bash(systemctl:*)",
+
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Read(./secrets/**)"
+    ]
+  }
+}

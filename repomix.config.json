@@ -1,0 +1,38 @@
+{
+  "$schema": "https://repomix.com/schemas/latest/schema.json",
+  "input": {
+    "maxFileSize": 10485760
+  },
+  "output": {
+    "instructionFilePath": "ai_docs/prompt.md",
+    "filePath": "ai_docs/repomix-output.md",
+    "style": "xml",
+    "headerText": "# Moving Workloads Architecture Context\n\nThis package contains the context for ADR-style architecture documents for the Moving Workloads system in Platform Mesh.\nThese documents serve as the basis for user stories—not implementation specs.\n",
+    "parsableStyle": false,
+    "fileSummary": true,
+    "directoryStructure": true,
+    "files": true,
+    "removeComments": false,
+    "removeEmptyLines": true,
+    "compress": false,
+    "topFilesLength": 15,
+    "showLineNumbers": true,
+    "copyToClipboard": true,
+    "truncateBase64": true,
+    "git": {
+      "sortByChanges": true,
+      "sortByChangesMaxCommits": 50,
+      "includeDiffs": false
+    }
+  },
+  "include": [
+    "ai_docs/assets/architecture.drawio",
+    "ai_docs/proposal.md"
+  ],
+  "security": {
+    "enableSecurityCheck": true
+  },
+  "tokenCount": {
+    "encoding": "o200k_base"
+  }
+}

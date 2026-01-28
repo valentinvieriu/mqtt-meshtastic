@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Meshtastic MQTT Builder</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body {
+            background-color: #111827;
+            color: #e5e7eb;
+        }
+        .input-group {
+            transition: all 0.2s;
+        }
+        .input-group:focus-within {
+            transform: translateY(-1px);
+        }
+        /* Custom scrollbar for code blocks */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #1f2937; 
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #4b5563; 
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #6b7280; 
+        }
+    </style>
+</head>
+<body class="min-h-screen flex items-center justify-center p-4">
+
+    <div class="w-full max-w-5xl bg-gray-800 rounded-xl shadow-2xl overflow-hidden border border-gray-700">
+        
+        <!-- Header -->
+        <div class="bg-gray-900 p-6 border-b border-gray-700 flex justify-between items-center">
+            <div>
+                <h1 class="text-2xl font-bold text-green-400 flex items-center gap-2">
+                    <i class="fas fa-broadcast-tower"></i> Meshtastic MQTT Builder
+                </h1>
+                <p class="text-gray-400 text-sm mt-1">Generate valid <span class="text-yellow-400">JSON Payloads</span> for Proxy/Gateway Injection</p>
+            </div>
+            <div class="hidden sm:block text-right">
+                <span class="text-xs font-mono text-gray-500 block">Protocol V2</span>
+                <span class="text-xs font-mono text-gray-500 block">JSON / SendText</span>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-2">
+            
+            <!-- LEFT COLUMN: Configuration -->
+            <div class="p-6 space-y-6 border-r border-gray-700">
+                
+                <!-- Topic Configuration -->
+                <div>
+                    <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-4 flex items-center gap-2">
+                        <i class="fas fa-network-wired"></i> Topic Structure
+                    </h2>
+                    
+                    <div class="grid grid-cols-2 gap-4 mb-4">
+                        <div class="input-group">
+                            <label class="block text-xs text-gray-500 mb-1">Root</label>
+                            <input type="text" id="rootTopic" value="msh" class="w-full bg-gray-700 border border-gray-600 rounded p-2 text-sm text-white focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500 transition-colors">
+                        </div>
+                        <div class="input-group">
+                            <label class="block text-xs text-gray-500 mb-1">Region / Zone</label>
+                            <input type="text" id="zone" value="EU_868" class="w-full bg-gray-700 border border-gray-600 rounded p-2 text-sm text-white focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500 transition-colors">
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-4 mb-4">
+                        <div class="input-group">
+                            <label class="block text-xs text-gray-500 mb-1">Path</label>
+                            <input type="text" id="subPath" value="2/json" class="w-full bg-gray-700 border border-gray-600 rounded p-2 text-sm text-white focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500 transition-colors">
+                        </div>
+                        <div class="input-group">
+                            <label class="block text-xs text-gray-500 mb-1">Target Channel</label>
+                            <div class="relative">
+                                <select id="channelSelect" onchange="updateChannel()" class="w-full bg-gray-700 border border-gray-600 rounded p-2 text-sm text-white focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500 transition-colors appearance-none">
+                                    <option value="LongFast">LongFast (Best for Testing)</option>
+                                    <option value="mqtt">mqtt (Dedicated Channel)</option>
+                                    <option value="custom">Custom...</option>
+                                </select>
+                                <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-400">
+                                    <i class="fas fa-chevron-down text-xs"></i>
+                                </div>
+                            </div>
+                            <!-- Hidden Custom Input -->
+                            <input type="text" id="channel" value="LongFast" class="hidden w-full mt-2 bg-gray-700 border border-gray-600 rounded p-2 text-sm text-white font-mono">
+                            <p class="text-[10px] text-gray-400 mt-1" id="channelHint">Ensure "Downlink" is enabled for this channel on the node.</p>
+                        </div>
+                    </div>
+
+                    <div class="input-group">
+                        <label class="block text-xs text-gray-500 mb-1">Gateway ID (Your Node)</label>
+                        <div class="relative">
+                            <input type="text" id="gatewayId" value="!d844b556" class="w-full bg-gray-700 border border-gray-600 rounded p-2 text-sm text-white font-mono focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500 transition-colors">
+                            <div class="absolute right-2 top-2 text-gray-500 text-xs pointer-events-none">Node ID</div>
+                        </div>
+                        <p class="text-xs text-gray-500 mt-1">The node connected to the phone/broker.</p>
+                    </div>
+                </div>
+
+                <hr class="border-gray-700">
+
+                <!-- Payload Configuration -->
+                <div>
+                    <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-4 flex items-center gap-2">
+                        <i class="fas fa-paper-plane"></i> Message Content
+                    </h2>
+
+                    <div class="grid grid-cols-2 gap-4 mb-4">
+                        <div class="input-group">
+                            <label class="block text-xs text-gray-500 mb-1">Sender (From)</label>
+                            <div class="relative">
+                                <input type="text" id="senderId" readonly class="w-full bg-gray-800 border border-gray-600 rounded p-2 text-sm text-gray-400 font-mono cursor-not-allowed">
+                                <div class="absolute right-2 top-2 text-xs text-gray-500"><i class="fas fa-lock"></i> Matches Gateway</div>
+                            </div>
+                            <div class="text-xs text-green-500/80 mt-1 font-mono" id="senderIntPreview">Int: -</div>
+                        </div>
+                        <div class="input-group">
+                            <label class="block text-xs text-gray-500 mb-1">Receiver (To)</label>
+                            <input type="text" id="receiverId" value="!b2a73a2c" placeholder="!hex or ^all" class="w-full bg-gray-700 border border-gray-600 rounded p-2 text-sm text-white font-mono focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500 transition-colors">
+                            <div class="text-xs text-green-500/80 mt-1 font-mono" id="receiverIntPreview">Int: -</div>
+                        </div>
+                    </div>
+
+                    <div class="input-group">
+                        <label class="block text-xs text-gray-500 mb-1">Text Message</label>
+                        <textarea id="messageText" rows="2" class="w-full bg-gray-700 border border-gray-600 rounded p-2 text-sm text-white focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500 transition-colors">Hello via MQTT</textarea>
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- RIGHT COLUMN: Output -->
+            <div class="p-6 bg-gray-900 flex flex-col">
+                <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-4 flex items-center gap-2">
+                    <i class="fas fa-code"></i> Generated Output
+                </h2>
+
+                <!-- Topic Output -->
+                <div class="mb-4">
+                    <div class="flex justify-between items-end mb-2">
+                        <label class="text-xs text-gray-500">MQTT Topic</label>
+                        <button onclick="copyToClipboard('outTopic')" class="text-xs text-green-400 hover:text-green-300 transition-colors flex items-center gap-1">
+                            <i class="far fa-copy"></i> Copy
+                        </button>
+                    </div>
+                    <div class="bg-black border border-gray-700 rounded-lg p-3 font-mono text-sm break-all text-green-300 relative group">
+                        <div id="outTopic">...</div>
+                    </div>
+                </div>
+
+                <!-- Payload Output -->
+                <div class="mb-6">
+                    <div class="flex justify-between items-end mb-2">
+                        <label class="text-xs text-gray-500">JSON Payload</label>
+                        <button onclick="copyToClipboard('outPayload')" class="text-xs text-green-400 hover:text-green-300 transition-colors flex items-center gap-1">
+                            <i class="far fa-copy"></i> Copy
+                        </button>
+                    </div>
+                    <div class="bg-black border border-gray-700 rounded-lg p-3 font-mono text-sm text-blue-300 relative overflow-auto max-h-48">
+                        <pre id="outPayload">...</pre>
+                    </div>
+                </div>
+
+                <!-- Troubleshooting Panel -->
+                <div class="mt-auto bg-gray-800 rounded-lg border border-gray-700 p-4">
+                    <h3 class="text-xs font-bold text-yellow-500 uppercase tracking-wide mb-3 flex items-center gap-2">
+                        <i class="fas fa-wrench"></i> Debugging Checklist
+                    </h3>
+                    <ul class="space-y-2 text-xs text-gray-400">
+                        <li class="flex items-start gap-2">
+                            <input type="checkbox" class="mt-0.5 accent-green-500">
+                            <span>Phone App: <strong>MQTT Proxy</strong> is enabled.</span>
+                        </li>
+                        <li class="flex items-start gap-2">
+                            <input type="checkbox" class="mt-0.5 accent-green-500">
+                            <span>Node Channel Settings: <strong>Downlink</strong> is enabled for <span id="debugChannelName" class="font-mono text-white">LongFast</span>.</span>
+                        </li>
+                        <li class="flex items-start gap-2">
+                            <input type="checkbox" class="mt-0.5 accent-green-500">
+                            <span>Broker: Use <a href="http://mqtt-explorer.com/" target="_blank" class="text-blue-400 underline">MQTT Explorer</a> on PC to verify your message actually arrived at the broker.</span>
+                        </li>
+                        <li class="flex items-start gap-2">
+                            <input type="checkbox" class="mt-0.5 accent-green-500">
+                            <span><strong>Testing Tip:</strong> Start with <code class="bg-gray-700 px-1 text-white">LongFast</code>. Some phone apps don't sync custom channel subscriptions automatically.</span>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Notification Toast -->
+    <div id="toast" class="fixed bottom-5 right-5 bg-green-600 text-white px-4 py-2 rounded shadow-lg transform translate-y-20 opacity-0 transition-all duration-300 flex items-center gap-2">
+        <i class="fas fa-check-circle"></i>
+        <span>Copied to clipboard!</span>
+    </div>
+
+<script>
+    // State management
+    const inputs = {
+        root: document.getElementById('rootTopic'),
+        zone: document.getElementById('zone'),
+        path: document.getElementById('subPath'),
+        channelSelect: document.getElementById('channelSelect'),
+        channel: document.getElementById('channel'),
+        gateway: document.getElementById('gatewayId'),
+        sender: document.getElementById('senderId'),
+        receiver: document.getElementById('receiverId'),
+        msg: document.getElementById('messageText')
+    };
+
+    const outputs = {
+        topic: document.getElementById('outTopic'),
+        payload: document.getElementById('outPayload'),
+        senderInt: document.getElementById('senderIntPreview'),
+        receiverInt: document.getElementById('receiverIntPreview'),
+        debugChannel: document.getElementById('debugChannelName')
+    };
+
+    // UI Logic for Channel Select
+    function updateChannel() {
+        const val = inputs.channelSelect.value;
+        if (val === 'custom') {
+            inputs.channel.classList.remove('hidden');
+            inputs.channel.value = '';
+            inputs.channel.focus();
+        } else {
+            inputs.channel.classList.add('hidden');
+            inputs.channel.value = val;
+        }
+        generate();
+    }
+    
+    // Attach to window for HTML access
+    window.updateChannel = updateChannel;
+
+    // Helper: Convert Meshtastic ID formats to Integer
+    function parseNodeId(idStr) {
+        if (!idStr) return 0;
+        idStr = idStr.trim();
+        if (idStr.toLowerCase() === '^all') return 4294967295; 
+        if (idStr.startsWith('!')) return parseInt(idStr.substring(1), 16);
+        if (idStr.startsWith('0x')) return parseInt(idStr, 16);
+        if (!isNaN(idStr)) return parseInt(idStr, 10);
+        return 0;
+    }
+
+    // Main Generator Logic
+    function generate() {
+        // Sync Sender with Gateway
+        inputs.sender.value = inputs.gateway.value;
+        const currentChannel = inputs.channel.value || 'LongFast';
+        outputs.debugChannel.innerText = currentChannel;
+
+        // 1. Build Topic
+        const topic = `${inputs.root.value}/${inputs.zone.value}/${inputs.path.value}/${currentChannel}/${inputs.gateway.value}`;
+        
+        // 2. Parse IDs
+        const fromInt = parseNodeId(inputs.sender.value);
+        const toInt = parseNodeId(inputs.receiver.value);
+
+        outputs.senderInt.innerText = isNaN(fromInt) ? 'Invalid' : `Int: ${fromInt}`;
+        outputs.receiverInt.innerText = isNaN(toInt) ? 'Invalid' : `Int: ${toInt}`;
+
+        // 3. Build Payload
+        const payloadObj = {
+            from: fromInt || 0,
+            to: toInt || 0,
+            type: "sendtext",
+            payload: inputs.msg.value
+        };
+
+        // 4. Render
+        outputs.topic.innerText = topic;
+        outputs.payload.innerText = JSON.stringify(payloadObj, null, 2);
+    }
+
+    // Clipboard Logic
+    function copyToClipboard(elementId) {
+        const text = document.getElementById(elementId).innerText;
+        if (navigator.clipboard && window.isSecureContext) {
+            navigator.clipboard.writeText(text).then(showToast);
+        } else {
+            const textArea = document.createElement("textarea");
+            textArea.value = text;
+            textArea.style.position = "fixed";
+            textArea.style.left = "-9999px";
+            document.body.appendChild(textArea);
+            textArea.focus();
+            textArea.select();
+            try { document.execCommand('copy'); showToast(); } catch (err) {}
+            document.body.removeChild(textArea);
+        }
+    }
+
+    function showToast() {
+        const toast = document.getElementById('toast');
+        toast.classList.remove('translate-y-20', 'opacity-0');
+        setTimeout(() => {
+            toast.classList.add('translate-y-20', 'opacity-0');
+        }, 2000);
+    }
+
+    // Bind Listeners
+    Object.values(inputs).forEach(input => {
+        if (input && input.id !== 'senderId') {
+            input.addEventListener('input', generate);
+        }
+    });
+
+    // Initial Run
+    generate();
+</script>
+</body>
+</html>
