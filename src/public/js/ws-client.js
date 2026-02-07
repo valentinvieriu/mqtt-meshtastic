@@ -82,11 +82,15 @@ export class WsClient {
     return false;
   }
 
-  publish({ channel, gatewayId, to, text, key }) {
+  publish({ root, region, path, channel, gatewayId, from, to, text, key }) {
     return this.send({
       type: 'publish',
+      root,
+      region,
+      path,
       channel,
       gatewayId,
+      from,
       to,
       text,
       key,

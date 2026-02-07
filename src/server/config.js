@@ -41,7 +41,14 @@ export const config = {
 
   // Meshtastic
   meshtastic: {
-    rootTopic: process.env.MQTT_ROOT_TOPIC || 'msh/EU_868/2/e',
+    // Decomposed topic components
+    mqttRoot: process.env.MQTT_ROOT || 'msh',
+    region: process.env.MQTT_REGION || 'EU_868',
+    defaultPath: process.env.MQTT_PATH || '2/e', // '2/e' for protobuf, '2/json' for JSON
+    // Computed rootTopic for subscriptions
+    get rootTopic() {
+      return `${this.mqttRoot}/${this.region}/${this.defaultPath}`;
+    },
     defaultChannel: process.env.DEFAULT_CHANNEL || 'LongFast',
     // The expanded default key for LongFast channel (derived from AQ== + channel hash)
     // See: https://github.com/pdxlocations/connect

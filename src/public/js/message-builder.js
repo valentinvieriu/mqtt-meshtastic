@@ -21,6 +21,10 @@ export function buildTopic({ rootTopic, channel, gatewayId }) {
   return `${rootTopic}/${channel}/${gatewayId}`;
 }
 
+export function buildTopicFromComponents({ root, region, path, channel, gatewayId }) {
+  return `${root}/${region}/${path}/${channel}/${gatewayId}`;
+}
+
 export function parseTopic(topic) {
   // msh/EU_868/2/e/LongFast/!b2a73a2c
   const parts = topic.split('/');

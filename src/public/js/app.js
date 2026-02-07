@@ -1,14 +1,21 @@
 // Main application entry point
 
 import { WsClient } from './ws-client.js';
-import { buildTopic, parseNodeId, parseTopic } from './message-builder.js';
+import { buildTopicFromComponents, parseNodeId, parseTopic } from './message-builder.js';
 import { $, bindInputs, copyToClipboard, updateConnectionStatus, showToast } from './ui.js';
 
 // State - will be populated from server config
 const state = {
-  rootTopic: 'msh/EU_868/2/e',
+  // Decomposed topic components
+  mqttRoot: 'msh',
+  region: 'EU_868',
+  path: '2/e', // '2/e' for protobuf, '2/json' for JSON mode
   channel: 'LongFast',
   gatewayId: '!d844b556',
+  // Sender settings
+  senderId: '!d844b556',
+  senderAuto: true, // When true, senderId is locked to gatewayId
+  // Message content
   receiverId: '^all',
   message: 'Hello from web!',
   key: '1PG7OiApB1nwvP+rz05pAQ==', // Expanded default LongFast key
@@ -23,12 +30,20 @@ async function init() {
     const res = await fetch('/api/config');
     const config = await res.json();
 
-    state.rootTopic = config.rootTopic;
+    // Load decomposed topic components
+    state.mqttRoot = config.mqttRoot || 'msh';
+    state.region = config.region || 'EU_868';
+    state.path = config.defaultPath || '2/e';
     state.channel = config.defaultChannel;
     state.gatewayId = config.gatewayId;
+    state.senderId = config.gatewayId; // Start with sender = gateway
 
     // Update UI with config values
+    $('#mqtt-root').value = state.mqttRoot;
+    $('#region').value = state.region;
+    $('#path-select').value = state.path;
     $('#gateway-id').value = state.gatewayId;
+    $('#sender-id').value = state.senderId;
 
     // Connect to WebSocket
     const wsUrl = `ws://${location.hostname}:${config.wsPort}`;
@@ -54,11 +69,24 @@ async function init() {
   // Bind UI
   bindInputs('.sync-input', syncState);
 
+  // Path select (determines mode)
+  $('#path-select').addEventListener('change', () => {
+    syncState();
+    updateModeUI();
+  });
+
+  // Channel select
   $('#channel-select').addEventListener('change', () => {
     syncState();
     if ($('#channel-select').value === 'custom') {
       $('#channel-custom').focus();
     }
+  });
+
+  // Sender auto checkbox
+  $('#sender-auto').addEventListener('change', () => {
+    syncState();
+    updateSenderUI();
   });
 
   $('#copy-topic').addEventListener('click', () => {
@@ -77,8 +105,69 @@ async function init() {
   // Clear button
   $('#clear-log')?.addEventListener('click', clearLog);
 
+  // Initial UI state
+  updateModeUI();
+  updateSenderUI();
+
   // Initial render
   generate();
+}
+
+// Update UI based on mode (protobuf vs JSON)
+function updateModeUI() {
+  const isJsonMode = state.path === '2/json';
+  const keyGroup = $('#key-group');
+  const jsonWarning = $('#json-mode-warning');
+  const modeIndicator = $('#mode-indicator');
+
+  // Hide encryption key in JSON mode
+  if (keyGroup) {
+    keyGroup.style.display = isJsonMode ? 'none' : 'block';
+  }
+
+  // Show JSON mode warning
+  if (jsonWarning) {
+    jsonWarning.style.display = isJsonMode ? 'block' : 'none';
+  }
+
+  // Update mode indicator
+  if (modeIndicator) {
+    if (isJsonMode) {
+      modeIndicator.textContent = 'JSON';
+      modeIndicator.className = 'text-[10px] px-2 py-0.5 rounded bg-yellow-600 text-white font-medium';
+    } else {
+      modeIndicator.textContent = 'Protobuf';
+      modeIndicator.className = 'text-[10px] px-2 py-0.5 rounded bg-green-600 text-white font-medium';
+    }
+  }
+
+  // In JSON mode, auto-select 'mqtt' channel
+  if (isJsonMode) {
+    const channelSelect = $('#channel-select');
+    if (channelSelect && channelSelect.value !== 'mqtt') {
+      channelSelect.value = 'mqtt';
+      state.channel = 'mqtt';
+      $('#channel-custom').classList.add('hidden');
+    }
+  }
+}
+
+// Update sender field based on auto checkbox
+function updateSenderUI() {
+  const senderInput = $('#sender-id');
+  const autoCheckbox = $('#sender-auto');
+
+  if (senderInput && autoCheckbox) {
+    if (state.senderAuto) {
+      senderInput.value = state.gatewayId;
+      senderInput.disabled = true;
+      senderInput.classList.add('opacity-50');
+      state.senderId = state.gatewayId;
+    } else {
+      senderInput.disabled = false;
+      senderInput.classList.remove('opacity-50');
+    }
+  }
 }
 
 // Setup filter buttons
@@ -568,51 +657,95 @@ function escapeHtml(str) {
 
 // Generate output preview
 function generate() {
-  const topic = buildTopic({
-    rootTopic: state.rootTopic,
+  const isJsonMode = state.path === '2/json';
+
+  const topic = buildTopicFromComponents({
+    root: state.mqttRoot,
+    region: state.region,
+    path: state.path,
     channel: state.channel,
     gatewayId: state.gatewayId,
   });
 
-  const preview = {
-    serviceEnvelope: {
-      packet: {
-        from: state.gatewayId,
-        to: state.receiverId,
-        channel: 0,
-        hopLimit: 0,
-        viaMqtt: true,
-        encrypted: '<AES256-CTR encrypted Data>',
-      },
-      channelId: state.channel,
-      gatewayId: state.gatewayId,
-    },
-    dataPayload: {
-      portnum: 1,
+  let preview;
+  if (isJsonMode) {
+    // JSON mode preview
+    preview = {
+      from: parseNodeId(state.senderId),
+      to: parseNodeId(state.receiverId),
+      type: 'sendtext',
       payload: state.message,
-    },
-  };
+    };
+  } else {
+    // Protobuf mode preview
+    preview = {
+      serviceEnvelope: {
+        packet: {
+          from: state.senderId,
+          to: state.receiverId,
+          channel: 0,
+          hopLimit: 0,
+          viaMqtt: true,
+          encrypted: '<AES256-CTR encrypted Data>',
+        },
+        channelId: state.channel,
+        gatewayId: state.gatewayId,
+      },
+      dataPayload: {
+        portnum: 1,
+        payload: state.message,
+      },
+    };
+  }
 
   // Update outputs
   $('#out-topic').textContent = topic;
   $('#out-payload').textContent = JSON.stringify(preview, null, 2);
-  $('#sender-id').value = state.gatewayId;
-  $('#debug-channel').textContent = state.channel;
+
+  // Update payload label
+  const payloadLabel = $('#payload-label');
+  if (payloadLabel) {
+    payloadLabel.textContent = isJsonMode ? 'Payload (JSON - unencrypted)' : 'Payload (before encryption)';
+  }
+
+  // Update debug info
+  const debugChannel = $('#debug-channel');
+  if (debugChannel) {
+    debugChannel.textContent = state.channel;
+  }
 
   // Update ID previews
-  $('#sender-int').textContent = `Int: ${parseNodeId(state.gatewayId)}`;
-  $('#receiver-int').textContent = `Int: ${parseNodeId(state.receiverId)}`;
+  const senderInt = $('#sender-int');
+  const receiverInt = $('#receiver-int');
+  if (senderInt) senderInt.textContent = `Int: ${parseNodeId(state.senderId)}`;
+  if (receiverInt) receiverInt.textContent = `Int: ${parseNodeId(state.receiverId)}`;
 
   return { topic };
 }
 
 // Sync state from inputs
 function syncState() {
+  // Topic structure
+  state.mqttRoot = $('#mqtt-root')?.value || 'msh';
+  state.region = $('#region')?.value || 'EU_868';
+  state.path = $('#path-select')?.value || '2/e';
   state.gatewayId = $('#gateway-id').value;
+
+  // Sender
+  const autoCheckbox = $('#sender-auto');
+  state.senderAuto = autoCheckbox?.checked ?? true;
+  if (state.senderAuto) {
+    state.senderId = state.gatewayId;
+  } else {
+    state.senderId = $('#sender-id')?.value || state.gatewayId;
+  }
+
+  // Message content
   state.receiverId = $('#receiver-id').value;
   state.message = $('#message-text').value;
-  state.key = $('#encryption-key').value || 'AQ==';
+  state.key = $('#encryption-key')?.value || 'AQ==';
 
+  // Channel
   const channelSelect = $('#channel-select');
   if (channelSelect.value === 'custom') {
     state.channel = $('#channel-custom').value || 'LongFast';
@@ -632,12 +765,18 @@ function sendMessage() {
     return;
   }
 
+  const isJsonMode = state.path === '2/json';
+
   const sent = wsClient.publish({
+    root: state.mqttRoot,
+    region: state.region,
+    path: state.path,
     channel: state.channel,
     gatewayId: state.gatewayId,
+    from: state.senderId,
     to: state.receiverId,
     text: state.message,
-    key: state.key,
+    key: isJsonMode ? undefined : state.key, // No key in JSON mode
   });
 
   if (!sent) {

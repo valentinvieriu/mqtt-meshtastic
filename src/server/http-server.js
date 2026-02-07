@@ -35,6 +35,11 @@ export function createHttpServer() {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({
         wsPort: config.wsPort,
+        // Decomposed topic components
+        mqttRoot: config.meshtastic.mqttRoot,
+        region: config.meshtastic.region,
+        defaultPath: config.meshtastic.defaultPath,
+        // Backward-compatible
         rootTopic: config.meshtastic.rootTopic,
         defaultChannel: config.meshtastic.defaultChannel,
         gatewayId: config.meshtastic.gatewayId,

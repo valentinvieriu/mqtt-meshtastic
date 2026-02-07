@@ -62,11 +62,18 @@ MQTT_HOST=mqtt.meshtastic.org
 MQTT_PORT=1883
 MQTT_USERNAME=meshdev
 MQTT_PASSWORD=large4cats
-MQTT_ROOT_TOPIC=msh/EU_868/2/e
+MQTT_ROOT=msh
+MQTT_REGION=EU_868
+MQTT_PATH=2/e
 DEFAULT_CHANNEL=LongFast
 DEFAULT_KEY=AQ==
 GATEWAY_ID=!d844b556
 ```
+
+**Topic components:**
+- `MQTT_ROOT`: Base topic prefix (default: `msh`)
+- `MQTT_REGION`: LoRa region (default: `EU_868`)
+- `MQTT_PATH`: Protocol path - `2/e` for encrypted protobuf, `2/json` for JSON downlink
 
 ## Development
 ```bash

@@ -236,66 +236,121 @@ wsServer.on('connection', (ws) => {
   });
 });
 
+// Publish message using Protobuf (encrypted binary format)
+async function publishProtobufMessage(ws, { root, region, path, channel, gatewayId, from, to, text, key }) {
+  const fromNode = parseNodeId(from || gatewayId);
+  const toNode = parseNodeId(to);
+  const packetId = generatePacketId();
+  const effectiveKey = key || config.meshtastic.defaultKey;
+
+  // Build topic: msh/EU_868/2/e/LongFast/!gateway
+  const topic = `${root}/${region}/${path}/${channel}/${gatewayId}`;
+
+  // Compute channel hash (XOR of channel name and key bytes)
+  const channelHash = generateChannelHash(channel, effectiveKey);
+
+  // Create Data message (portnum 1 = TEXT_MESSAGE_APP)
+  const dataMessage = encodeData({
+    portnum: PortNum.TEXT_MESSAGE_APP,
+    payload: Buffer.from(text, 'utf-8'),
+    bitfield: 1, // Indicates sender capabilities
+  });
+
+  // Encrypt the Data message
+  const encryptedData = encrypt(
+    dataMessage,
+    effectiveKey,
+    packetId,
+    fromNode
+  );
+
+  // Create ServiceEnvelope with MeshPacket
+  const envelope = encodeServiceEnvelope({
+    packet: {
+      from: fromNode,
+      to: toNode,
+      id: packetId,
+      channel: channelHash, // Hash of channel name XOR key
+      hopLimit: 0, // Zero-hop policy for public MQTT broker
+      hopStart: 0, // Original hop count (0 = won't propagate beyond direct nodes)
+      wantAck: false,
+      viaMqtt: true, // Indicates message came from MQTT gateway
+      encrypted: encryptedData,
+    },
+    channelId: channel,
+    gatewayId: gatewayId,
+  });
+
+  // Publish to MQTT
+  await mqttClient.publish(topic, envelope);
+
+  console.log(`[MQTT] Published protobuf to ${topic} (packet ${packetId})`);
+  ws.send(JSON.stringify({
+    type: 'published',
+    mode: 'protobuf',
+    topic,
+    packetId,
+    from: formatNodeId(fromNode),
+    to: formatNodeId(toNode),
+    text,
+  }));
+}
+
+// Publish message using JSON downlink format (unencrypted)
+async function publishJsonMessage(ws, { root, region, channel, gatewayId, from, to, text }) {
+  const fromNode = parseNodeId(from || gatewayId);
+  const toNode = parseNodeId(to);
+
+  // JSON mode always uses '2/json' path and typically 'mqtt' channel
+  // Build topic: msh/EU_868/2/json/mqtt/!gateway
+  const topic = `${root}/${region}/2/json/${channel}/${gatewayId}`;
+
+  // JSON downlink payload format
+  // See: https://meshtastic.org/docs/software/integrations/mqtt/
+  const payload = {
+    from: fromNode,
+    to: toNode,
+    type: 'sendtext',
+    payload: text,
+  };
+
+  // Publish JSON string to MQTT
+  await mqttClient.publish(topic, JSON.stringify(payload));
+
+  console.log(`[MQTT] Published JSON to ${topic}`);
+  ws.send(JSON.stringify({
+    type: 'published',
+    mode: 'json',
+    topic,
+    from: formatNodeId(fromNode),
+    to: formatNodeId(toNode),
+    text,
+  }));
+}
+
 // Handle messages from WebSocket clients
 async function handleClientMessage(ws, msg) {
   switch (msg.type) {
     case 'publish': {
-      const { channel, gatewayId, to, text, key } = msg;
-      const fromNode = parseNodeId(gatewayId);
-      const toNode = parseNodeId(to);
-      const packetId = generatePacketId();
-      const effectiveKey = key || config.meshtastic.defaultKey;
-
-      // Build topic: msh/EU_868/2/e/LongFast/!gateway
-      const topic = `${config.meshtastic.rootTopic}/${channel}/${gatewayId}`;
-
-      // Compute channel hash (XOR of channel name and key bytes)
-      const channelHash = generateChannelHash(channel, effectiveKey);
-
-      // Create Data message (portnum 1 = TEXT_MESSAGE_APP)
-      const dataMessage = encodeData({
-        portnum: PortNum.TEXT_MESSAGE_APP,
-        payload: Buffer.from(text, 'utf-8'),
-        bitfield: 1, // Indicates sender capabilities
-      });
-
-      // Encrypt the Data message
-      const encryptedData = encrypt(
-        dataMessage,
-        effectiveKey,
-        packetId,
-        fromNode
-      );
-
-      // Create ServiceEnvelope with MeshPacket
-      const envelope = encodeServiceEnvelope({
-        packet: {
-          from: fromNode,
-          to: toNode,
-          id: packetId,
-          channel: channelHash, // Hash of channel name XOR key
-          hopLimit: 0, // Zero-hop policy for public MQTT broker
-          hopStart: 0, // Original hop count (0 = won't propagate beyond direct nodes)
-          wantAck: false,
-          viaMqtt: true, // Indicates message came from MQTT gateway
-          encrypted: encryptedData,
-        },
-        channelId: channel,
-        gatewayId: gatewayId,
-      });
-
-      // Publish to MQTT
-      await mqttClient.publish(topic, envelope);
-
-      console.log(`[MQTT] Published to ${topic} (packet ${packetId})`);
-      ws.send(JSON.stringify({
-        type: 'published',
-        topic,
-        packetId,
-        from: gatewayId,
-        to: formatNodeId(toNode),
+      // Extract parameters with defaults for backward compatibility
+      const {
+        root = config.meshtastic.mqttRoot,
+        region = config.meshtastic.region,
+        path = config.meshtastic.defaultPath,
+        channel,
+        gatewayId,
+        from,
+        to,
         text,
-      }));
+        key,
+      } = msg;
+
+      // Route based on path - JSON mode or Protobuf mode
+      if (path === '2/json') {
+        await publishJsonMessage(ws, { root, region, channel, gatewayId, from, to, text });
+      } else {
+        await publishProtobufMessage(ws, { root, region, path, channel, gatewayId, from, to, text, key });
+      }
       break;
     }
 

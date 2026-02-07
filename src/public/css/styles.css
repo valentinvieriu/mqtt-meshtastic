@@ -64,3 +64,25 @@ body {
   background-color: #374151 !important;
   color: white !important;
 }
+
+/* Disabled input styling */
+input:disabled,
+select:disabled,
+textarea:disabled {
+  cursor: not-allowed;
+}
+
+/* Checkbox styling */
+input[type="checkbox"] {
+  accent-color: #22c55e;
+}
+
+/* JSON mode warning animation */
+#json-mode-warning {
+  animation: warningPulse 2s ease-in-out infinite;
+}
+
+@keyframes warningPulse {
+  0%, 100% { border-color: rgba(202, 138, 4, 0.5); }
+  50% { border-color: rgba(202, 138, 4, 1); }
+}
