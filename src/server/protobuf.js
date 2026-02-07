@@ -325,7 +325,8 @@ export function encodeMeshPacket({
   return Buffer.concat(parts);
 }
 
-export function decodeMeshPacket(buffer) {
+export function decodeMeshPacket(buffer, options = {}) {
+  const { logErrors = true, strict = false } = options;
   const reader = new ProtoReader(buffer);
   const result = {
     from: 0,
@@ -413,7 +414,13 @@ export function decodeMeshPacket(buffer) {
       }
     } catch (e) {
       // If we hit an error, stop parsing but return what we have
-      console.error(`[Protobuf] Error at field ${fieldNumber}: ${e.message}`);
+      if (logErrors) {
+        console.error(`[Protobuf] Error at field ${fieldNumber}: ${e.message}`);
+      }
+      if (strict) {
+        throw e;
+      }
+      result._decodeError = { fieldNumber, message: e.message };
       break;
     }
   }
@@ -447,7 +454,8 @@ export function encodeServiceEnvelope({ packet, channelId, gatewayId }) {
   return Buffer.concat(parts);
 }
 
-export function decodeServiceEnvelope(buffer) {
+export function decodeServiceEnvelope(buffer, options = {}) {
+  const { logErrors = true, strict = false } = options;
   const reader = new ProtoReader(buffer);
   const result = {
     packet: null,
@@ -464,19 +472,36 @@ export function decodeServiceEnvelope(buffer) {
       switch (fieldNumber) {
         case 1: // packet (MeshPacket)
           const packetLen = reader.readVarint();
-          if (packetLen > 0 && packetLen <= reader.buffer.length - reader.pos) {
-            result.packet = decodeMeshPacket(reader.readBytes(packetLen));
+          if (packetLen > 0) {
+            if (packetLen > reader.buffer.length - reader.pos) {
+              throw new Error(`Packet length exceeds buffer: ${packetLen}`);
+            }
+            result.packet = decodeMeshPacket(reader.readBytes(packetLen), options);
           }
           break;
         case 2: // channel_id (string)
           const chLen = reader.readVarint();
-          if (chLen > 0 && chLen <= 64) {
+          if (chLen > 0) {
+            if (chLen > reader.buffer.length - reader.pos) {
+              throw new Error(`channel_id length exceeds buffer: ${chLen}`);
+            }
+            if (chLen > 64) {
+              reader.readBytes(chLen); // skip oversized values without desyncing the reader
+              break;
+            }
             result.channelId = reader.readString(chLen);
           }
           break;
         case 3: // gateway_id (string)
           const gwLen = reader.readVarint();
-          if (gwLen > 0 && gwLen <= 64) {
+          if (gwLen > 0) {
+            if (gwLen > reader.buffer.length - reader.pos) {
+              throw new Error(`gateway_id length exceeds buffer: ${gwLen}`);
+            }
+            if (gwLen > 64) {
+              reader.readBytes(gwLen); // skip oversized values without desyncing the reader
+              break;
+            }
             result.gatewayId = reader.readString(gwLen);
           }
           break;
@@ -484,7 +509,13 @@ export function decodeServiceEnvelope(buffer) {
           reader.skipField(wireType);
       }
     } catch (e) {
-      console.error(`[Protobuf] ServiceEnvelope error at field ${fieldNumber}: ${e.message}`);
+      if (logErrors) {
+        console.error(`[Protobuf] ServiceEnvelope error at field ${fieldNumber}: ${e.message}`);
+      }
+      if (strict) {
+        throw e;
+      }
+      result._decodeError = { fieldNumber, message: e.message };
       break;
     }
   }

@@ -601,7 +601,21 @@ function handleIncomingMessage(msg) {
 
   if (msg.type === 'raw_message') {
     console.log('[RAW]', msg.topic, msg.payloadHex);
-    addToLog('in', { text: `[raw ${msg.size}B] ${msg.payloadHex?.substring(0, 30)}...`, topic: msg.topic, raw: true });
+    const preview = msg.previewText || msg.payloadHex?.substring(0, 30) || '';
+    const label = msg.contentType || 'raw';
+    addToLog('in', {
+      text: `[${label} ${msg.size}B] ${preview}`,
+      topic: msg.topic,
+      raw: true,
+      contentType: label,
+      topicPath: msg.topicPath || 'unknown',
+      decodeError: msg.decodeError || null,
+      previewText: msg.previewText || null,
+      payloadHex: msg.payloadHex || null,
+      payloadBase64: msg.payload || null,
+      payload: msg.json || msg.packetMeta || null,
+      timestamp: msg.timestamp,
+    });
     return;
   }
 
@@ -630,7 +644,7 @@ function addToLog(direction, data) {
 
   const entry = document.createElement('div');
   const isIn = direction === 'in';
-  entry.dataset.portname = data.portName || 'sent';
+  entry.dataset.portname = data.portName || (data.raw ? 'raw' : 'sent');
   if (data.topic) entry.dataset.topic = data.topic;
 
   // Store full data on the element for detail panel
@@ -641,7 +655,8 @@ function addToLog(direction, data) {
   if (isIn && data.from) {
     const statusIcon = data.decryptionStatus === 'success' ? '🔓' :
                        data.decryptionStatus === 'failed' ? '🔒' :
-                       data.decryptionStatus === 'plaintext' ? '📝' : '❓';
+                       data.decryptionStatus === 'plaintext' ? '📝' :
+                       data.decryptionStatus === 'json' ? '🧾' : '❓';
 
     const portConfig = getPortConfig(data.portName, data.payload, data.text);
 
@@ -672,8 +687,10 @@ function addToLog(direction, data) {
     entry.innerHTML = `
       <div class="flex justify-between">
         <span class="text-gray-500 text-[10px]">${time}</span>
-        <span class="text-red-400 text-[10px]">⚠ raw</span>
+        <span class="text-red-400 text-[10px]">⚠ ${escapeHtml(data.contentType || 'raw')}</span>
       </div>
+      <div class="text-gray-500 text-[10px] mt-1">${escapeHtml(data.topicPath || 'unknown')}</div>
+      ${data.decodeError ? `<div class="text-red-400/80 text-[10px] mt-1">${escapeHtml(data.decodeError)}</div>` : ''}
       <div class="text-gray-500 italic mt-1 font-mono text-[10px]">${escapeHtml(data.text)}</div>
     `;
   } else {
@@ -746,6 +763,24 @@ function renderDetailPanel(data) {
     html += `<div class="detail-row"><div class="detail-label">Topic</div><div class="detail-value" style="font-size:10px">${escapeHtml(data.topic)}</div></div>`;
   }
 
+  if (data.raw) {
+    if (data.contentType) {
+      html += `<div class="detail-row"><div class="detail-label">Content Type</div><div class="detail-value">${escapeHtml(data.contentType)}</div></div>`;
+    }
+    if (data.topicPath) {
+      html += `<div class="detail-row"><div class="detail-label">Topic Path</div><div class="detail-value">${escapeHtml(data.topicPath)}</div></div>`;
+    }
+    if (data.decodeError) {
+      html += `<div class="detail-row"><div class="detail-label">Decode Note</div><div class="detail-value" style="color:#f44747">${escapeHtml(data.decodeError)}</div></div>`;
+    }
+    if (data.previewText) {
+      html += `<div class="detail-row"><div class="detail-label">Preview</div><div class="detail-value">${escapeHtml(data.previewText)}</div></div>`;
+    }
+    if (data.payloadHex) {
+      html += `<div class="detail-row"><div class="detail-label">Payload Hex</div><div class="detail-value" style="font-size:10px;word-break:break-all">${escapeHtml(data.payloadHex)}</div></div>`;
+    }
+  }
+
   if (data.portName) {
     html += `<div class="detail-row"><div class="detail-label">Port</div><div class="detail-value">${escapeHtml(data.portName)} (${data.portnum ?? '?'})</div></div>`;
   }
@@ -755,7 +790,7 @@ function renderDetailPanel(data) {
   }
 
   if (data.decryptionStatus) {
-    const statusColors = { success: '#89d185', failed: '#f44747', plaintext: '#cca700' };
+    const statusColors = { success: '#89d185', failed: '#f44747', plaintext: '#cca700', json: '#3cb4ff' };
     const color = statusColors[data.decryptionStatus] || '#858585';
     html += `<div class="detail-row"><div class="detail-label">Decryption</div><div class="detail-value" style="color:${color}">${data.decryptionStatus}</div></div>`;
   }

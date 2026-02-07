@@ -37,6 +37,428 @@ const PORT_PAYLOAD_DECODERS = {
   [PortNum.TRACEROUTE_APP]: decodeTraceroute,
   [PortNum.MAP_REPORT_APP]: decodeMapReport,
 };
+const PROTO_TOPIC_PATHS = new Set(['e', 'c']);
+const JSON_TYPE_TO_PORTNUM = {
+  text: PortNum.TEXT_MESSAGE_APP,
+  telemetry: PortNum.TELEMETRY_APP,
+  nodeinfo: PortNum.NODEINFO_APP,
+  position: PortNum.POSITION_APP,
+  waypoint: PortNum.WAYPOINT_APP,
+  neighborinfo: PortNum.NEIGHBORINFO_APP,
+  traceroute: PortNum.TRACEROUTE_APP,
+  detection_sensor: PortNum.DETECTION_SENSOR_APP,
+  detectionsensor: PortNum.DETECTION_SENSOR_APP,
+  remotehw: PortNum.REMOTE_HARDWARE_APP,
+  remote_hardware: PortNum.REMOTE_HARDWARE_APP,
+  mapreport: PortNum.MAP_REPORT_APP,
+  map_report: PortNum.MAP_REPORT_APP,
+  sendtext: PortNum.TEXT_MESSAGE_APP, // Downlink envelope style
+  sendposition: PortNum.POSITION_APP, // Downlink envelope style
+};
+const RAW_HEX_PREVIEW_LENGTH = 100;
+const RAW_TEXT_PREVIEW_LENGTH = 140;
+const PRINTABLE_RATIO_THRESHOLD = 0.85;
+const UTF8_REPLACEMENT_RATIO_THRESHOLD = 0.15;
+
+function parseTopicComponents(topic) {
+  const parts = topic.split('/').filter(Boolean);
+  const protoVersionIndex = parts.indexOf('2');
+
+  if (protoVersionIndex < 0) {
+    return {
+      path: 'unknown',
+      channel: parts.length >= 2 ? parts[parts.length - 2] : 'unknown',
+      gateway: parts.length >= 1 ? parts[parts.length - 1] : 'unknown',
+    };
+  }
+
+  return {
+    path: parts[protoVersionIndex + 1] || 'unknown',
+    channel: parts[protoVersionIndex + 2] || 'unknown',
+    gateway: parts[protoVersionIndex + 3] || 'unknown',
+  };
+}
+
+function getTopicPath(topic) {
+  return parseTopicComponents(topic).path;
+}
+
+function getPrintableByteRatio(buffer) {
+  if (!buffer?.length) return 0;
+  let printableCount = 0;
+  for (const byte of buffer) {
+    const isWhitespace = byte === 9 || byte === 10 || byte === 13;
+    const isAsciiPrintable = byte >= 32 && byte <= 126;
+    if (isWhitespace || isAsciiPrintable) printableCount++;
+  }
+  return printableCount / buffer.length;
+}
+
+function getUtf8ReplacementRatio(buffer) {
+  if (!buffer?.length || buffer.length < 3) return 0;
+  let replacementSequences = 0;
+
+  for (let i = 0; i < buffer.length - 2; i++) {
+    if (buffer[i] === 0xef && buffer[i + 1] === 0xbf && buffer[i + 2] === 0xbd) {
+      replacementSequences++;
+    }
+  }
+
+  return (replacementSequences * 3) / buffer.length;
+}
+
+function truncatePreview(text, maxLen = RAW_TEXT_PREVIEW_LENGTH) {
+  const compact = (text || '').replace(/\s+/g, ' ').trim();
+  return compact.length > maxLen ? `${compact.slice(0, maxLen)}...` : compact;
+}
+
+function parseJsonBuffer(buffer) {
+  const text = buffer.toString('utf-8').trim();
+  if (!text || (text[0] !== '{' && text[0] !== '[')) {
+    return { ok: false, text };
+  }
+
+  try {
+    return { ok: true, value: JSON.parse(text), text };
+  } catch (err) {
+    return { ok: false, text, error: err.message };
+  }
+}
+
+function normalizeNodeId(value) {
+  if (typeof value === 'string') return parseNodeId(value);
+  if (typeof value === 'number' && Number.isFinite(value)) return value >>> 0;
+  return 0;
+}
+
+function resolveJsonType(rawType) {
+  if (typeof rawType !== 'string') return '';
+  return rawType.trim().toLowerCase();
+}
+
+function getJsonPortnum(type) {
+  return JSON_TYPE_TO_PORTNUM[type] ?? UNKNOWN_PORTNUM;
+}
+
+function getJsonPortName(type) {
+  if (!type) return 'JSON';
+  return type.toUpperCase();
+}
+
+function extractJsonText(type, payload) {
+  if (type !== 'text' && type !== 'sendtext') return null;
+
+  if (typeof payload === 'string') return payload;
+  if (payload && typeof payload === 'object') {
+    if (typeof payload.text === 'string') return payload.text;
+    if (typeof payload.payload === 'string') return payload.payload;
+  }
+
+  return null;
+}
+
+function toFiniteNumber(value, fallback = 0) {
+  const num = Number(value);
+  return Number.isFinite(num) ? num : fallback;
+}
+
+function normalizeMeshtasticJsonPayload(type, payload) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return payload;
+
+  if (type === 'position') {
+    const latitudeI = toFiniteNumber(payload.latitude_i ?? payload.latitudeI, 0);
+    const longitudeI = toFiniteNumber(payload.longitude_i ?? payload.longitudeI, 0);
+    const latitude = latitudeI !== 0 ? latitudeI / 1e7 : 0;
+    const longitude = longitudeI !== 0 ? longitudeI / 1e7 : 0;
+
+    return {
+      ...payload,
+      latitudeI,
+      longitudeI,
+      latitude,
+      longitude,
+      altitude: toFiniteNumber(payload.altitude ?? payload.altitude_i, 0),
+      satsInView: toFiniteNumber(payload.sats_in_view ?? payload.satsInView, 0),
+      groundSpeed: toFiniteNumber(payload.ground_speed ?? payload.groundSpeed, 0),
+      groundTrack: toFiniteNumber(payload.ground_track ?? payload.groundTrack, 0),
+      precisionBits: toFiniteNumber(payload.precision_bits ?? payload.precisionBits, 0),
+      time: toFiniteNumber(payload.time, 0),
+    };
+  }
+
+  if (type === 'nodeinfo') {
+    return {
+      ...payload,
+      id: payload.id ?? payload.user_id ?? payload.userId ?? '',
+      longName: payload.long_name ?? payload.longname ?? payload.longName ?? '',
+      shortName: payload.short_name ?? payload.shortname ?? payload.shortName ?? '',
+      hwModel: toFiniteNumber(payload.hw_model ?? payload.hwModel, 0),
+      role: toFiniteNumber(payload.role, 0),
+    };
+  }
+
+  return payload;
+}
+
+function getEnvelopeDecodeError(envelope) {
+  if (envelope?._decodeError) {
+    return `ServiceEnvelope field ${envelope._decodeError.fieldNumber}: ${envelope._decodeError.message}`;
+  }
+  if (envelope?.packet?._decodeError) {
+    return `MeshPacket field ${envelope.packet._decodeError.fieldNumber}: ${envelope.packet._decodeError.message}`;
+  }
+  return null;
+}
+
+function joinNotes(...notes) {
+  const filtered = notes.filter(Boolean);
+  return filtered.length > 0 ? filtered.join(' | ') : null;
+}
+
+function scoreMeshtasticEnvelopeConfidence(envelope, envelopeDecodeError) {
+  if (!envelope?.packet) return 0;
+
+  const { from, to, id, encrypted, decoded } = envelope.packet;
+  let score = 0;
+
+  score += 2; // Has packet field
+
+  if (Number.isInteger(from) && from > 0 && Number.isInteger(to) && to >= 0) {
+    score += 2;
+  }
+
+  if (Number.isInteger(id) && id > 0) {
+    score += 2;
+  }
+
+  if (Number.isInteger(envelope.packet.rxTime) && envelope.packet.rxTime > 0) {
+    score += 1;
+  }
+
+  if (envelope.packet.hopStart > 0 || envelope.packet.hopLimit > 0 || envelope.packet.viaMqtt) {
+    score += 1;
+  }
+
+  if ((encrypted?.length > 0) || Boolean(decoded)) {
+    score += 3;
+  }
+
+  if (envelope.channelId || envelope.gatewayId) {
+    score += 1;
+  }
+
+  if (!envelopeDecodeError) {
+    score += 1;
+  } else if (/length exceeds buffer/i.test(envelopeDecodeError)) {
+    score -= 1; // Could be valid packet with truncated channel/gateway metadata
+  } else if (/unknown wire type/i.test(envelopeDecodeError)) {
+    score -= 3;
+  } else {
+    score -= 2;
+  }
+
+  return score;
+}
+
+function buildPacketMeta(packet) {
+  if (!packet) return null;
+
+  return {
+    from: formatNodeId(packet.from),
+    to: formatNodeId(packet.to),
+    id: packet.id,
+    hopLimit: packet.hopLimit,
+    hopStart: packet.hopStart,
+    viaMqtt: packet.viaMqtt,
+    rxTime: packet.rxTime,
+  };
+}
+
+function getPacketPreview(packet) {
+  const meta = buildPacketMeta(packet);
+  if (!meta) return null;
+
+  return `${meta.from} -> ${meta.to} (id ${meta.id || 0})`;
+}
+
+function decodeMeshtasticJsonMessage(topic, jsonPayload) {
+  const topicSuffix = parseTopicSuffix(topic);
+  const type = resolveJsonType(jsonPayload?.type);
+  const portnum = getJsonPortnum(type);
+  const payload = normalizeMeshtasticJsonPayload(type, jsonPayload?.payload ?? null);
+  const fromNode = normalizeNodeId(jsonPayload?.from);
+  const toNode = normalizeNodeId(jsonPayload?.to ?? 0xffffffff);
+  const packetId = Number.isFinite(jsonPayload?.id) ? Number(jsonPayload.id) : 0;
+  const timestampSeconds = Number.isFinite(jsonPayload?.timestamp) ? Number(jsonPayload.timestamp) : null;
+  const messageTimestamp = timestampSeconds
+    ? (timestampSeconds < 10_000_000_000 ? timestampSeconds * 1000 : timestampSeconds)
+    : Date.now();
+
+  return {
+    type: 'message',
+    topic,
+    channelId: topicSuffix.channel,
+    gatewayId: typeof jsonPayload?.sender === 'string' ? jsonPayload.sender : topicSuffix.gateway,
+    from: formatNodeId(fromNode),
+    to: formatNodeId(toNode),
+    packetId,
+    hopLimit: Number.isFinite(jsonPayload?.hop_limit) ? Number(jsonPayload.hop_limit) : 0,
+    hopStart: Number.isFinite(jsonPayload?.hop_start) ? Number(jsonPayload.hop_start) : 0,
+    rxTime: timestampSeconds || 0,
+    viaMqtt: true,
+    portnum,
+    portName: portnum !== UNKNOWN_PORTNUM ? getPortName(portnum) : getJsonPortName(type),
+    text: extractJsonText(type, payload),
+    payload,
+    decryptionStatus: 'json',
+    timestamp: messageTimestamp,
+  };
+}
+
+function classifyIncomingPayload(topic, rawMessage) {
+  const topicPath = getTopicPath(topic);
+  const jsonCandidate = parseJsonBuffer(rawMessage);
+
+  // JSON topics are parsed as JSON first-class payloads and should not be protobuf-probed.
+  if (topicPath === 'json') {
+    if (jsonCandidate.ok) {
+      return {
+        kind: 'meshtastic.json',
+        topicPath,
+        json: jsonCandidate.value,
+        previewText: truncatePreview(jsonCandidate.text),
+        decodeError: null,
+      };
+    }
+
+    const printableRatio = getPrintableByteRatio(rawMessage);
+    const replacementRatio = getUtf8ReplacementRatio(rawMessage);
+    const utf8CorruptionHint = replacementRatio >= UTF8_REPLACEMENT_RATIO_THRESHOLD
+      ? `Likely UTF-8 replacement corruption detected (${(replacementRatio * 100).toFixed(0)}% EF BF BD bytes)`
+      : null;
+
+    if (printableRatio >= PRINTABLE_RATIO_THRESHOLD) {
+      return {
+        kind: 'text/plain',
+        topicPath,
+        previewText: truncatePreview(rawMessage.toString('utf-8')),
+        decodeError: joinNotes(
+          `Invalid JSON payload${jsonCandidate.error ? `: ${jsonCandidate.error}` : ''}`,
+          utf8CorruptionHint
+        ),
+      };
+    }
+
+    return {
+      kind: utf8CorruptionHint ? 'binary/utf8-corrupted' : 'binary',
+      topicPath,
+      decodeError: joinNotes(
+        `Invalid JSON payload${jsonCandidate.error ? `: ${jsonCandidate.error}` : ''}`,
+        utf8CorruptionHint
+      ),
+    };
+  }
+
+  // For topic paths outside /2/e, /2/c, /2/json, avoid protobuf probing.
+  if (!PROTO_TOPIC_PATHS.has(topicPath)) {
+    if (jsonCandidate.ok) {
+      return {
+        kind: 'json',
+        topicPath,
+        json: jsonCandidate.value,
+        previewText: truncatePreview(jsonCandidate.text),
+        decodeError: `Unsupported topic path "${topicPath}" (expected e/c/json)`,
+      };
+    }
+
+    const printableRatio = getPrintableByteRatio(rawMessage);
+    const replacementRatio = getUtf8ReplacementRatio(rawMessage);
+    const utf8CorruptionHint = replacementRatio >= UTF8_REPLACEMENT_RATIO_THRESHOLD
+      ? `Likely UTF-8 replacement corruption detected (${(replacementRatio * 100).toFixed(0)}% EF BF BD bytes)`
+      : null;
+
+    if (printableRatio >= PRINTABLE_RATIO_THRESHOLD) {
+      return {
+        kind: 'text/plain',
+        topicPath,
+        previewText: truncatePreview(rawMessage.toString('utf-8')),
+        decodeError: joinNotes(`Unsupported topic path "${topicPath}" (expected e/c/json)`, utf8CorruptionHint),
+      };
+    }
+
+    return {
+      kind: utf8CorruptionHint ? 'binary/utf8-corrupted' : 'binary',
+      topicPath,
+      decodeError: joinNotes(`Unsupported topic path "${topicPath}" (expected e/c/json)`, utf8CorruptionHint),
+    };
+  }
+
+  const envelope = decodeServiceEnvelope(rawMessage, { logErrors: false });
+  const envelopeDecodeError = getEnvelopeDecodeError(envelope);
+  const envelopeScore = scoreMeshtasticEnvelopeConfidence(envelope, envelopeDecodeError);
+  const packetHasDataPayload = Boolean(envelope?.packet?.decoded) || (envelope?.packet?.encrypted?.length > 0);
+  const isLikelyMeshtastic = envelopeScore >= 6;
+
+  if (isLikelyMeshtastic) {
+    const isHeaderOnly = !packetHasDataPayload;
+    return {
+      kind: isHeaderOnly ? 'meshtastic.protobuf.header-only' : 'meshtastic.protobuf',
+      topicPath,
+      envelope,
+      packetMeta: envelope.packet,
+      previewText: isHeaderOnly ? getPacketPreview(envelope.packet) : null,
+      decodeError: envelopeDecodeError,
+    };
+  }
+
+  if (jsonCandidate.ok) {
+    return {
+      kind: 'json',
+      topicPath,
+      json: jsonCandidate.value,
+      previewText: truncatePreview(jsonCandidate.text),
+      decodeError: `Unexpected JSON payload on /2/${topicPath} topic (expected protobuf)`,
+    };
+  }
+
+  const printableRatio = getPrintableByteRatio(rawMessage);
+  const replacementRatio = getUtf8ReplacementRatio(rawMessage);
+  const utf8CorruptionHint = replacementRatio >= UTF8_REPLACEMENT_RATIO_THRESHOLD
+    ? `Likely UTF-8 replacement corruption detected (${(replacementRatio * 100).toFixed(0)}% EF BF BD bytes)`
+    : null;
+
+  if (printableRatio >= PRINTABLE_RATIO_THRESHOLD) {
+    return {
+      kind: 'text/plain',
+      topicPath,
+      previewText: truncatePreview(rawMessage.toString('utf-8')),
+      decodeError: joinNotes(envelopeDecodeError, utf8CorruptionHint),
+    };
+  }
+
+  return {
+    kind: utf8CorruptionHint ? 'binary/utf8-corrupted' : 'binary',
+    topicPath,
+    decodeError: joinNotes(envelopeDecodeError, utf8CorruptionHint),
+  };
+}
+
+function buildRawMessage(topic, rawMessage, classification) {
+  return {
+    type: 'raw_message',
+    topic,
+    payload: rawMessage.toString('base64'),
+    payloadHex: rawMessage.toString('hex').substring(0, RAW_HEX_PREVIEW_LENGTH),
+    size: rawMessage.length,
+    contentType: classification.kind,
+    topicPath: classification.topicPath,
+    previewText: classification.previewText || null,
+    decodeError: classification.decodeError || null,
+    json: classification.json || null,
+    packetMeta: buildPacketMeta(classification.packetMeta),
+    timestamp: Date.now(),
+  };
+}
 
 // Track connected WebSocket clients
 const wsClients = new Set();
@@ -56,56 +478,65 @@ const mqttClient = createMqttClient({
 
 // Handle incoming MQTT messages
 function handleMqttMessage(topic, rawMessage) {
-  try {
-    const envelope = decodeServiceEnvelope(rawMessage);
+  const classification = classifyIncomingPayload(topic, rawMessage);
 
-    const { packet, channelId, gatewayId } = envelope;
-
-    if (!packet) {
-      console.log(`[MQTT] Empty packet from ${topic}`);
+  if (classification.kind === 'meshtastic.json') {
+    try {
+      const jsonMessage = decodeMeshtasticJsonMessage(topic, classification.json);
+      broadcast(jsonMessage);
       return;
+    } catch (err) {
+      classification.kind = 'json';
+      classification.decodeError = `JSON decode failed: ${err.message}`;
     }
-
-    const {
-      decodedText,
-      portnum,
-      decryptionStatus,
-      decodedPayload,
-    } = decodePacketContent(packet);
-
-    // Broadcast to WebSocket clients
-    const topicSuffix = (!channelId || !gatewayId) ? parseTopicSuffix(topic) : null;
-    broadcast({
-      type: 'message',
-      topic,
-      channelId: channelId || topicSuffix.channel,
-      gatewayId: gatewayId || topicSuffix.gateway,
-      from: formatNodeId(packet.from),
-      to: formatNodeId(packet.to),
-      packetId: packet.id,
-      hopLimit: packet.hopLimit,
-      hopStart: packet.hopStart,
-      rxTime: packet.rxTime,
-      viaMqtt: packet.viaMqtt,
-      portnum,
-      portName: getPortName(portnum),
-      text: decodedText,
-      payload: decodedPayload,
-      decryptionStatus,
-      timestamp: Date.now(),
-    });
-  } catch (err) {
-    console.error('[MQTT] Failed to decode protobuf:', err.message);
-    // Still forward raw message for debugging
-    broadcast({
-      type: 'raw_message',
-      topic,
-      payload: rawMessage.toString('base64'),
-      payloadHex: rawMessage.toString('hex').substring(0, 100),
-      size: rawMessage.length,
-      timestamp: Date.now(),
-    });
   }
+
+  if (classification.kind.startsWith('meshtastic.protobuf')) {
+    try {
+      const envelope = classification.envelope;
+      const { packet, channelId, gatewayId } = envelope;
+
+      if (!packet) {
+        console.log(`[MQTT] Empty packet from ${topic}`);
+        return;
+      }
+
+      const {
+        decodedText,
+        portnum,
+        decryptionStatus,
+        decodedPayload,
+      } = decodePacketContent(packet);
+
+      // Broadcast to WebSocket clients
+      const topicSuffix = (!channelId || !gatewayId) ? parseTopicSuffix(topic) : null;
+      broadcast({
+        type: 'message',
+        topic,
+        channelId: channelId || topicSuffix.channel,
+        gatewayId: gatewayId || topicSuffix.gateway,
+        from: formatNodeId(packet.from),
+        to: formatNodeId(packet.to),
+        packetId: packet.id,
+        hopLimit: packet.hopLimit,
+        hopStart: packet.hopStart,
+        rxTime: packet.rxTime,
+        viaMqtt: packet.viaMqtt,
+        portnum,
+        portName: getPortName(portnum),
+        text: decodedText,
+        payload: decodedPayload,
+        decryptionStatus,
+        timestamp: Date.now(),
+      });
+      return;
+    } catch (err) {
+      classification.kind = 'binary';
+      classification.decodeError = `Meshtastic protobuf decode failed: ${err.message}`;
+    }
+  }
+
+  broadcast(buildRawMessage(topic, rawMessage, classification));
 }
 
 function decodePacketContent(packet) {
@@ -195,11 +626,12 @@ function decodePayloadByType(portnum, payload) {
 }
 
 // Extract channel and gateway from topic like msh/EU_868/2/e/LongFast/!nodeId
+// Handles custom roots like msh/EU_868/DE/2/...
 function parseTopicSuffix(topic) {
-  const parts = topic.split('/');
+  const parsed = parseTopicComponents(topic);
   return {
-    channel: parts.length >= 2 ? parts[parts.length - 2] : 'unknown',
-    gateway: parts.length >= 1 ? parts[parts.length - 1] : 'unknown',
+    channel: parsed.channel,
+    gateway: parsed.gateway,
   };
 }
 
