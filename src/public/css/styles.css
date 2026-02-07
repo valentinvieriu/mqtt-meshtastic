@@ -1029,55 +1029,115 @@ input[type="checkbox"] {
 }
 
 /* ============================================
-   Manage View — Tabs
+   Settings View — 3-Column Layout
    ============================================ */
 
-.manage-tabs {
+/* Sidebar menu */
+.settings-menu {
   display: flex;
-  border-bottom: 1px solid #3c3c3c;
-  background: #252526;
-  flex-shrink: 0;
-  overflow-x: auto;
+  flex-direction: column;
+  padding: 4px 0;
 }
 
-.manage-tab {
-  flex: 1;
-  padding: 6px 4px;
+.settings-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 16px;
   background: none;
   border: none;
-  border-bottom: 2px solid transparent;
+  border-left: 2px solid transparent;
   color: #858585;
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.3px;
-  text-transform: uppercase;
+  font-size: 12px;
   cursor: pointer;
-  white-space: nowrap;
-  transition: color 0.15s, border-color 0.15s;
+  text-align: left;
+  transition: background 0.1s, color 0.1s;
 }
 
-.manage-tab:hover {
+.settings-menu-item i {
+  width: 16px;
+  text-align: center;
+  font-size: 12px;
+}
+
+.settings-menu-item:hover {
   color: #cccccc;
+  background: rgba(255, 255, 255, 0.04);
 }
 
-.manage-tab.active {
+.settings-menu-item.active {
   color: #ffffff;
-  border-bottom-color: #007acc;
+  border-left-color: #007acc;
+  background: rgba(0, 122, 204, 0.1);
 }
 
-.manage-tab-content {
+/* Main area: list + editor side by side */
+.settings-layout {
+  display: flex;
   flex: 1;
-  overflow-y: auto;
   min-height: 0;
 }
 
-.manage-tab-panel {
-  display: none;
-  padding: 4px 12px 12px;
+.settings-list-panel {
+  width: 240px;
+  min-width: 180px;
+  background: #252526;
+  border-right: 1px solid #3c3c3c;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
 }
 
-.manage-tab-panel.active {
-  display: block;
+.settings-list-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid #3c3c3c;
+  flex-shrink: 0;
+}
+
+.settings-list-header span {
+  font-size: 11px;
+  font-weight: 600;
+  color: #bbbbbb;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.settings-list-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 8px;
+}
+
+.entity-add-btn-inline {
+  background: none;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+  color: #858585;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 11px;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.entity-add-btn-inline:hover {
+  background: rgba(0, 122, 204, 0.15);
+  color: #3cb4ff;
+  border-color: rgba(0, 122, 204, 0.3);
+}
+
+.settings-editor-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
 }
 
 /* ============================================

@@ -32,12 +32,6 @@
       <button class="activity-bar-btn" data-view="send" title="Send Message">
         <i class="fas fa-paper-plane"></i>
       </button>
-      <button class="activity-bar-btn" data-view="channels" title="Channels">
-        <i class="fas fa-hashtag"></i>
-      </button>
-      <button class="activity-bar-btn" data-view="nodes" title="Nodes">
-        <i class="fas fa-microchip"></i>
-      </button>
       <button class="activity-bar-btn" data-view="manage" title="Settings" style="margin-top:auto;margin-bottom:4px">
         <i class="fas fa-cog"></i>
       </button>
@@ -225,53 +219,22 @@
         </div>
       </div>
 
-      <!-- ===== Channels Sidebar ===== -->
-      <div class="sidebar-view" id="sidebar-channels">
-        <div class="sidebar-header">CHANNELS</div>
-        <div class="manage-tab-content">
-          <div id="channels-channels-list" class="entity-list"></div>
-          <button class="entity-add-btn" id="channels-add-btn">
-            <i class="fas fa-plus"></i> Add Channel
-          </button>
-        </div>
-      </div>
-
-      <!-- ===== Nodes Sidebar ===== -->
-      <div class="sidebar-view" id="sidebar-nodes">
-        <div class="sidebar-header">NODES</div>
-        <div class="manage-tab-content">
-          <div id="nodes-nodes-list" class="entity-list"></div>
-          <button class="entity-add-btn" id="nodes-add-btn">
-            <i class="fas fa-plus"></i> Add Node
-          </button>
-        </div>
-      </div>
-
       <!-- ===== Settings Sidebar (formerly Manage) ===== -->
       <div class="sidebar-view" id="sidebar-manage">
         <div class="sidebar-header">SETTINGS</div>
-
-        <!-- Tab Bar -->
-        <div class="manage-tabs">
-          <button class="manage-tab active" data-manage-tab="networks">Networks</button>
-          <button class="manage-tab" data-manage-tab="keys">Keys</button>
-        </div>
-
-        <!-- Tab Panels -->
-        <div class="manage-tab-content">
-          <div class="manage-tab-panel active" id="manage-panel-networks">
-            <div id="manage-networks-list" class="entity-list"></div>
-            <button class="entity-add-btn" data-entity-add="network">
-              <i class="fas fa-plus"></i> Add Network
-            </button>
-          </div>
-
-          <div class="manage-tab-panel" id="manage-panel-keys">
-            <div id="manage-keys-list" class="entity-list"></div>
-            <button class="entity-add-btn" data-entity-add="key">
-              <i class="fas fa-plus"></i> Add Key
-            </button>
-          </div>
+        <div class="settings-menu">
+          <button class="settings-menu-item active" data-settings-category="networks">
+            <i class="fas fa-network-wired"></i> Networks
+          </button>
+          <button class="settings-menu-item" data-settings-category="keys">
+            <i class="fas fa-key"></i> Keys
+          </button>
+          <button class="settings-menu-item" data-settings-category="channels">
+            <i class="fas fa-hashtag"></i> Channels
+          </button>
+          <button class="settings-menu-item" data-settings-category="nodes">
+            <i class="fas fa-microchip"></i> Nodes
+          </button>
         </div>
       </div>
     </div>
@@ -358,52 +321,33 @@
         </div>
       </div>
 
-      <!-- Channels Main: Channel Editor -->
-      <div class="main-view" id="main-channels">
-        <div class="tab-bar">
-          <div class="tab-bar-tabs">
-            <span class="tab-bar-label"><i class="fas fa-edit"></i> <span id="channels-editor-title">Select a channel to edit</span></span>
-          </div>
-        </div>
-        <div class="manage-editor-area">
-          <div id="channels-editor" class="manage-editor">
-            <div class="manage-placeholder">
-              <i class="fas fa-hashtag"></i>
-              <span>Select a channel from the sidebar to edit, or click "Add" to create a new one.</span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Nodes Main: Node Editor -->
-      <div class="main-view" id="main-nodes">
-        <div class="tab-bar">
-          <div class="tab-bar-tabs">
-            <span class="tab-bar-label"><i class="fas fa-edit"></i> <span id="nodes-editor-title">Select a node to edit</span></span>
-          </div>
-        </div>
-        <div class="manage-editor-area">
-          <div id="nodes-editor" class="manage-editor">
-            <div class="manage-placeholder">
-              <i class="fas fa-microchip"></i>
-              <span>Select a node from the sidebar to edit, or click "Add" to create a new one.</span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Settings Main: Entity Editor (Networks + Keys) -->
+      <!-- Settings Main: List + Editor -->
       <div class="main-view" id="main-manage">
-        <div class="tab-bar">
-          <div class="tab-bar-tabs">
-            <span class="tab-bar-label"><i class="fas fa-edit"></i> <span id="manage-editor-title">Select an entity to edit</span></span>
+        <div class="settings-layout">
+          <!-- List Panel -->
+          <div class="settings-list-panel">
+            <div class="settings-list-header">
+              <span id="settings-list-title">Networks</span>
+              <button class="entity-add-btn-inline" id="settings-add-btn" title="Add"><i class="fas fa-plus"></i></button>
+            </div>
+            <div class="settings-list-content">
+              <div id="settings-entity-list" class="entity-list"></div>
+            </div>
           </div>
-        </div>
-        <div class="manage-editor-area">
-          <div id="manage-editor" class="manage-editor">
-            <div class="manage-placeholder">
-              <i class="fas fa-database"></i>
-              <span>Select an entity from the sidebar to edit, or click "Add" to create a new one.</span>
+          <!-- Editor Panel -->
+          <div class="settings-editor-panel">
+            <div class="tab-bar">
+              <div class="tab-bar-tabs">
+                <span class="tab-bar-label"><i class="fas fa-edit"></i> <span id="manage-editor-title">Select an entity to edit</span></span>
+              </div>
+            </div>
+            <div class="manage-editor-area">
+              <div id="manage-editor" class="manage-editor">
+                <div class="manage-placeholder">
+                  <i class="fas fa-cog"></i>
+                  <span>Select an entity from the sidebar to edit, or click "Add" to create a new one.</span>
+                </div>
+              </div>
             </div>
           </div>
         </div>

@@ -21,22 +21,12 @@ const state = {
   sidebarCollapsed: false,
   subscriptionVisibility: {},
   selectedMessage: null,
-  // Channels view state
-  channels: {
-    selectedId: null,
-    isNew: false,
-  },
-  // Nodes view state
-  nodes: {
-    selectedId: null,
-    isNew: false,
-  },
   // Manage (Settings) view state
   manage: {
-    selectedType: null,  // 'network' | 'key'
+    selectedType: null,  // 'network' | 'key' | 'channel' | 'node'
     selectedId: null,
     isNew: false,
-    activeTab: 'networks',
+    activeCategory: 'networks',
   },
 };
 
@@ -373,12 +363,6 @@ async function init() {
   // Manage view
   setupManageView();
 
-  // Channels view
-  setupChannelsView();
-
-  // Nodes view
-  setupNodesView();
-
   // Filters
   setupFilterButtons();
   setupNodeFilterControls();
@@ -392,8 +376,6 @@ async function init() {
   catalog.onChange(() => {
     populateDropdowns();
     renderManageLists();
-    renderChannelsList();
-    renderNodesList();
   });
 
   // Initial UI
@@ -402,8 +384,6 @@ async function init() {
   updateSenderUI();
   generatePreview();
   renderManageLists();
-  renderChannelsList();
-  renderNodesList();
 }
 
 // =============== UI Prefs ===============
@@ -414,9 +394,12 @@ function loadUiPrefs() {
     if (raw) {
       const prefs = JSON.parse(raw);
       if (prefs.activeView) state.activeView = prefs.activeView;
-      if (prefs.manageActiveTab) state.manage.activeTab = prefs.manageActiveTab;
-      if (prefs.channelsSelectedId) state.channels.selectedId = prefs.channelsSelectedId;
-      if (prefs.nodesSelectedId) state.nodes.selectedId = prefs.nodesSelectedId;
+      if (prefs.manageActiveCategory || prefs.manageActiveTab) state.manage.activeCategory = prefs.manageActiveCategory || prefs.manageActiveTab;
+      // Migrate legacy views: channels/nodes are now settings categories
+      if (state.activeView === 'channels' || state.activeView === 'nodes') {
+        state.manage.activeCategory = state.activeView;
+        state.activeView = 'manage';
+      }
     }
   } catch { /* ignore */ }
 }
@@ -425,9 +408,7 @@ function saveUiPrefs() {
   try {
     localStorage.setItem(UI_PREFS_KEY, JSON.stringify({
       activeView: state.activeView,
-      manageActiveTab: state.manage.activeTab,
-      channelsSelectedId: state.channels.selectedId,
-      nodesSelectedId: state.nodes.selectedId,
+      manageActiveCategory: state.manage.activeCategory,
     }));
   } catch { /* ignore */ }
 }
@@ -1254,60 +1235,78 @@ function renderSubscriptions() {
 // =============== Manage View ===============
 
 function setupManageView() {
-  // Validate stored activeTab is still valid (only networks/keys now)
-  const validTabs = ['networks', 'keys'];
-  if (!validTabs.includes(state.manage.activeTab)) {
-    state.manage.activeTab = 'networks';
+  // Validate stored activeCategory
+  const validCategories = ['networks', 'keys', 'channels', 'nodes'];
+  if (!validCategories.includes(state.manage.activeCategory)) {
+    state.manage.activeCategory = 'networks';
   }
 
-  // Tab switching
-  $$('.manage-tab').forEach(tab => {
-    tab.addEventListener('click', () => {
-      const tabName = tab.dataset.manageTab;
-      state.manage.activeTab = tabName;
+  // Menu item switching
+  $$('.settings-menu-item').forEach(item => {
+    item.addEventListener('click', () => {
+      const category = item.dataset.settingsCategory;
+      state.manage.activeCategory = category;
+      state.manage.selectedType = null;
+      state.manage.selectedId = null;
+      state.manage.isNew = false;
       saveUiPrefs();
 
-      $$('.manage-tab').forEach(t => t.classList.remove('active'));
-      tab.classList.add('active');
+      $$('.settings-menu-item').forEach(i => i.classList.remove('active'));
+      item.classList.add('active');
 
-      $$('.manage-tab-panel').forEach(p => p.classList.remove('active'));
-      $(`#manage-panel-${tabName}`)?.classList.add('active');
+      renderManageLists();
+      renderManageEditor();
     });
   });
 
-  // Restore active tab
-  const activeTabBtn = $(`.manage-tab[data-manage-tab="${state.manage.activeTab}"]`);
-  if (activeTabBtn) {
-    $$('.manage-tab').forEach(t => t.classList.remove('active'));
-    activeTabBtn.classList.add('active');
-    $$('.manage-tab-panel').forEach(p => p.classList.remove('active'));
-    $(`#manage-panel-${state.manage.activeTab}`)?.classList.add('active');
+  // Restore active category
+  const activeItem = $(`.settings-menu-item[data-settings-category="${state.manage.activeCategory}"]`);
+  if (activeItem) {
+    $$('.settings-menu-item').forEach(i => i.classList.remove('active'));
+    activeItem.classList.add('active');
   }
 
-  // Add entity buttons
-  $$('[data-entity-add]').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const type = btn.dataset.entityAdd;
-      state.manage.selectedType = type;
-      state.manage.selectedId = null;
-      state.manage.isNew = true;
-      renderManageEditor();
-    });
+  // Add entity button (single button in list header)
+  $('#settings-add-btn')?.addEventListener('click', () => {
+    const categoryTypeMap = { networks: 'network', keys: 'key', channels: 'channel', nodes: 'node' };
+    const type = categoryTypeMap[state.manage.activeCategory];
+    if (!type) return;
+    state.manage.selectedType = type;
+    state.manage.selectedId = null;
+    state.manage.isNew = true;
+    renderManageLists();
+    renderManageEditor();
   });
 }
 
 function renderManageLists() {
-  renderEntityList('manage', 'networks', catalog.listNetworks(), n => n.name);
-  renderEntityList('manage', 'keys', catalog.listKeys(), k => k.name);
+  const titleEl = $('#settings-list-title');
+  const addBtn = $('#settings-add-btn');
+  const category = state.manage.activeCategory;
+  const categoryLabels = { networks: 'Networks', keys: 'Keys', channels: 'Channels', nodes: 'Nodes' };
+  if (titleEl) titleEl.textContent = categoryLabels[category] || 'Settings';
+
+  if (category === 'networks') {
+    renderEntityList('settings', 'entity', catalog.listNetworks(), n => n.name, { type: 'network' });
+  } else if (category === 'keys') {
+    renderEntityList('settings', 'entity', catalog.listKeys(), k => k.name, { type: 'key' });
+  } else if (category === 'channels') {
+    renderEntityList('settings', 'entity', catalog.listChannels(), c => c.name, { type: 'channel' });
+  } else if (category === 'nodes') {
+    renderEntityList('settings', 'entity', catalog.listNodes(), n => {
+      const gwBadge = n.isGateway ? ' [GW]' : '';
+      return `${n.label} (${n.nodeId})${gwBadge}`;
+    }, { type: 'node' });
+  }
 }
 
-function renderEntityList(prefix, section, items, labelFn, { selectedId, onSelect, onDelete } = {}) {
+function renderEntityList(prefix, section, items, labelFn, { selectedId, onSelect, onDelete, type: typeOverride } = {}) {
   const container = $(`#${prefix}-${section}-list`);
   if (!container) return;
 
-  // Map section name to entity type
+  // Map section name to entity type (override allows Settings list to pass type explicitly)
   const typeMap = { networks: 'network', keys: 'key', channels: 'channel', nodes: 'node' };
-  const type = typeMap[section];
+  const type = typeOverride || typeMap[section];
 
   // Determine selected based on context
   const isItemSelected = (itemId) => {
@@ -1389,12 +1388,15 @@ function renderManageEditor() {
   const { selectedType, selectedId, isNew } = state.manage;
 
   if (!selectedType) {
+    const placeholderIcons = { channels: 'fa-hashtag', nodes: 'fa-microchip' };
+    const icon = placeholderIcons[state.manage.activeCategory] || 'fa-cog';
+    const text = 'Select an entity from the list to edit, or click "Add" to create a new one.';
     title.textContent = 'Select an entity to edit';
-    editor.innerHTML = '<div class="manage-placeholder"><i class="fas fa-cog"></i><span>Select an entity from the sidebar to edit, or click "Add" to create a new one.</span></div>';
+    editor.innerHTML = `<div class="manage-placeholder"><i class="fas ${icon}"></i><span>${text}</span></div>`;
     return;
   }
 
-  const typeLabels = { network: 'Network', key: 'Key' };
+  const typeLabels = { network: 'Network', key: 'Key', channel: 'Channel', node: 'Node' };
   title.textContent = isNew ? `New ${typeLabels[selectedType]}` : `Edit ${typeLabels[selectedType]}`;
 
   const entity = isNew ? null : getEntityByType(selectedType, selectedId);
@@ -1402,6 +1404,8 @@ function renderManageEditor() {
   const renderers = {
     network: renderNetworkEditor,
     key: renderKeyEditor,
+    channel: renderChannelEditor,
+    node: renderNodeEditor,
   };
 
   editor.innerHTML = renderers[selectedType](entity);
@@ -1622,124 +1626,6 @@ function setupEditorEvents(type, entity, { stateRef, renderList, renderEditor, c
   });
 }
 
-// =============== Channels View ===============
-
-function setupChannelsView() {
-  $('#channels-add-btn')?.addEventListener('click', () => {
-    state.channels.selectedId = null;
-    state.channels.isNew = true;
-    renderChannelsList();
-    renderChannelsEditor();
-  });
-}
-
-function renderChannelsList() {
-  renderEntityList('channels', 'channels', catalog.listChannels(), c => c.name, {
-    selectedId: state.channels.selectedId,
-    onSelect: (_type, id) => {
-      state.channels.selectedId = id;
-      state.channels.isNew = false;
-      saveUiPrefs();
-      renderChannelsList();
-      renderChannelsEditor();
-    },
-    onDelete: (type, id) => {
-      handleEntityDelete(type, id, {
-        onClear: (deletedId) => {
-          if (state.channels.selectedId === deletedId) {
-            state.channels.selectedId = null;
-            renderChannelsEditor();
-          }
-        },
-      });
-    },
-  });
-}
-
-function renderChannelsEditor() {
-  const editor = $('#channels-editor');
-  const title = $('#channels-editor-title');
-  if (!editor) return;
-
-  const { selectedId, isNew } = state.channels;
-
-  if (!selectedId && !isNew) {
-    title.textContent = 'Select a channel to edit';
-    editor.innerHTML = '<div class="manage-placeholder"><i class="fas fa-hashtag"></i><span>Select a channel from the sidebar to edit, or click "Add" to create a new one.</span></div>';
-    return;
-  }
-
-  title.textContent = isNew ? 'New Channel' : 'Edit Channel';
-  const entity = isNew ? null : catalog.getChannel(selectedId);
-  editor.innerHTML = renderChannelEditor(entity);
-  setupEditorEvents('channel', entity, {
-    stateRef: state.channels,
-    renderList: renderChannelsList,
-    renderEditor: renderChannelsEditor,
-    container: '#channels-editor',
-  });
-}
-
-// =============== Nodes View ===============
-
-function setupNodesView() {
-  $('#nodes-add-btn')?.addEventListener('click', () => {
-    state.nodes.selectedId = null;
-    state.nodes.isNew = true;
-    renderNodesList();
-    renderNodesEditor();
-  });
-}
-
-function renderNodesList() {
-  renderEntityList('nodes', 'nodes', catalog.listNodes(), n => {
-    const gwBadge = n.isGateway ? ' [GW]' : '';
-    return `${n.label} (${n.nodeId})${gwBadge}`;
-  }, {
-    selectedId: state.nodes.selectedId,
-    onSelect: (_type, id) => {
-      state.nodes.selectedId = id;
-      state.nodes.isNew = false;
-      saveUiPrefs();
-      renderNodesList();
-      renderNodesEditor();
-    },
-    onDelete: (type, id) => {
-      handleEntityDelete(type, id, {
-        onClear: (deletedId) => {
-          if (state.nodes.selectedId === deletedId) {
-            state.nodes.selectedId = null;
-            renderNodesEditor();
-          }
-        },
-      });
-    },
-  });
-}
-
-function renderNodesEditor() {
-  const editor = $('#nodes-editor');
-  const title = $('#nodes-editor-title');
-  if (!editor) return;
-
-  const { selectedId, isNew } = state.nodes;
-
-  if (!selectedId && !isNew) {
-    title.textContent = 'Select a node to edit';
-    editor.innerHTML = '<div class="manage-placeholder"><i class="fas fa-microchip"></i><span>Select a node from the sidebar to edit, or click "Add" to create a new one.</span></div>';
-    return;
-  }
-
-  title.textContent = isNew ? 'New Node' : 'Edit Node';
-  const entity = isNew ? null : catalog.getNode(selectedId);
-  editor.innerHTML = renderNodeEditor(entity);
-  setupEditorEvents('node', entity, {
-    stateRef: state.nodes,
-    renderList: renderNodesList,
-    renderEditor: renderNodesEditor,
-    container: '#nodes-editor',
-  });
-}
 
 // =============== Boot ===============
 
