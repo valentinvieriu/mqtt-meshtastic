@@ -115,11 +115,11 @@ export class WsClient {
     });
   }
 
-  subscribe(topic) {
-    return this.send({
-      type: 'subscribe',
-      topic,
-    });
+  subscribe(topic, channel, key) {
+    const msg = { type: 'subscribe', topic };
+    if (channel) msg.channel = channel;
+    if (key) msg.key = key;
+    return this.send(msg);
   }
 
   unsubscribe(topic) {

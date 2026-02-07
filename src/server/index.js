@@ -263,7 +263,10 @@ function scoreMeshtasticEnvelopeConfidence(envelope, envelopeDecodeError) {
   } else if (/length exceeds buffer/i.test(envelopeDecodeError)) {
     score -= 1; // Could be valid packet with truncated channel/gateway metadata
   } else if (/unknown wire type/i.test(envelopeDecodeError)) {
-    score -= 3;
+    // Trailing unknown wire types in MeshPacket are common (newer firmware fields,
+    // extensions). Only penalise lightly — core fields were already parsed.
+    const isMeshPacketError = /^MeshPacket/i.test(envelopeDecodeError);
+    score -= isMeshPacketError ? 1 : 3;
   } else {
     score -= 2;
   }
@@ -605,6 +608,31 @@ function decodeEncryptedPacket(packet, context = {}) {
     }
   }
 
+  // Fallback: some gateways publish plaintext Data in the 'encrypted' field
+  // when their MQTT "Encryption Enabled" setting is OFF. Try decoding the raw
+  // bytes as a Data protobuf before giving up.
+  try {
+    const data = decodeData(packet.encrypted);
+    if (data.portnum > 0 && data.portnum <= PortNum.MAX && data.payload.length > 0) {
+      const decodedText = data.portnum === PortNum.TEXT_MESSAGE_APP
+        ? data.payload.toString('utf-8')
+        : null;
+
+      if (decodedText) {
+        console.log(`[MQTT] ${formatNodeId(packet.from)} → ${formatNodeId(packet.to)}: "${decodedText}" (plaintext in encrypted field)`);
+      }
+
+      return {
+        decodedText,
+        portnum: data.portnum,
+        decryptionStatus: 'plaintext',
+        decodedPayload: decodePayloadByType(data.portnum, data.payload),
+      };
+    }
+  } catch {
+    // Not valid plaintext either
+  }
+
   // Different key or malformed payload.
   return {
     decodedText: null,
@@ -886,6 +914,9 @@ async function handleClientMessage(ws, msg) {
 
     case 'subscribe': {
       const topic = msg.topic || `${config.meshtastic.mqttRoot}/${config.meshtastic.region}/#`;
+      if (msg.channel && msg.key) {
+        rememberChannelKey(msg.channel, msg.key);
+      }
       await mqttClient.subscribe(topic);
       ws.send(JSON.stringify({ type: 'subscribed', topic }));
       broadcast({ type: 'subscriptions', topics: mqttClient.getSubscriptions() });

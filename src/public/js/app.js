@@ -12,6 +12,7 @@ const state = {
     region: 'EU_868',
     path: '2/e',
     channel: 'LongFast',
+    key: 'AQ==',
   },
   // Send config (for publishing)
   send: {
@@ -33,6 +34,7 @@ const state = {
       region: 'EU_868',
       path: '2/e',
       channel: 'LongFast',
+      key: 'AQ==',
     },
     send: {
       root: 'msh',
@@ -259,6 +261,7 @@ async function init() {
     state.defaults.watch.region = config.region || state.defaults.watch.region;
     state.defaults.watch.path = config.defaultPath || state.defaults.watch.path;
     state.defaults.watch.channel = config.defaultChannel || state.defaults.watch.channel;
+    state.defaults.watch.key = config.defaultKey || state.defaults.watch.key;
 
     state.defaults.send.root = config.mqttRoot || state.defaults.send.root;
     state.defaults.send.region = config.region || state.defaults.send.region;
@@ -273,6 +276,7 @@ async function init() {
     state.watch.region = state.defaults.watch.region;
     state.watch.path = state.defaults.watch.path;
     state.watch.channel = state.defaults.watch.channel;
+    state.watch.key = state.defaults.watch.key;
 
     state.send.root = state.defaults.send.root;
     state.send.region = state.defaults.send.region;
@@ -288,6 +292,7 @@ async function init() {
     $('#watch-region').value = state.watch.region;
     $('#watch-path-select').value = state.watch.path;
     applyChannelSelection('watch', state.watch.channel);
+    $('#watch-key').value = state.watch.key;
 
     // Populate Send inputs
     $('#send-root').value = state.send.root;
@@ -503,6 +508,14 @@ function applyKeyPreset(value) {
   generatePreview();
 }
 
+function generateRandomKeyBase64(byteLength) {
+  const bytes = new Uint8Array(byteLength);
+  crypto.getRandomValues(bytes);
+  let binary = '';
+  for (const b of bytes) binary += String.fromCharCode(b);
+  return btoa(binary);
+}
+
 function setupDefaultActions() {
   $('#watch-channel-default-btn')?.addEventListener('click', () => {
     applyChannelSelection('watch', state.defaults.watch.channel);
@@ -530,11 +543,15 @@ function setupDefaultActions() {
   $('#receiver-default-btn')?.addEventListener('click', () => applyReceiverPreset(state.defaults.send.receiverId));
 
   $('#key-default-btn')?.addEventListener('click', () => applyKeyPreset(state.defaults.send.key));
-  // Meshtastic shorthand presets (default + simple channels).
   $('#key-short-btn')?.addEventListener('click', () => applyKeyPreset('AQ=='));
-  $('#key-simple1-btn')?.addEventListener('click', () => applyKeyPreset('Ag=='));
-  $('#key-simple2-btn')?.addEventListener('click', () => applyKeyPreset('Aw=='));
-  $('#key-simple3-btn')?.addEventListener('click', () => applyKeyPreset('BA=='));
+  $('#key-gen-128-btn')?.addEventListener('click', () => applyKeyPreset(generateRandomKeyBase64(16)));
+  $('#key-gen-256-btn')?.addEventListener('click', () => applyKeyPreset(generateRandomKeyBase64(32)));
+
+  // Watch key default
+  $('#watch-key-default-btn')?.addEventListener('click', () => {
+    $('#watch-key').value = 'AQ==';
+    syncWatchState();
+  });
 }
 
 // =============== Watch State ===============
@@ -552,6 +569,8 @@ function syncWatchState() {
     state.watch.channel = channelSelect.value;
     $('#watch-channel-custom').classList.add('hidden');
   }
+
+  state.watch.key = $('#watch-key')?.value || 'AQ==';
 }
 
 function updateWatchModeUI() {
@@ -1133,7 +1152,7 @@ function subscribeFromInputs() {
     root: state.watch.root, region: state.watch.region,
     path: state.watch.path, channel: state.watch.channel, gatewayId: '#',
   });
-  wsClient.subscribe(topic);
+  wsClient.subscribe(topic, state.watch.channel, state.watch.key);
 }
 
 function unsubscribeFromTopic(topic) {

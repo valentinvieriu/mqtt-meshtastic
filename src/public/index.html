@@ -101,6 +101,26 @@
           </div>
         </div>
 
+        <!-- Decryption Key Section -->
+        <div class="sidebar-section">
+          <button class="sidebar-section-header collapsed" data-collapse="watch-key-body">
+            <i class="fas fa-chevron-down sidebar-chevron"></i>
+            <span>DECRYPTION KEY</span>
+          </button>
+          <div class="sidebar-section-body collapsed-body" id="watch-key-body">
+            <div class="sidebar-field">
+              <label class="sidebar-label-with-actions">
+                <span>Key</span>
+                <span class="field-actions">
+                  <button type="button" id="watch-key-default-btn" class="field-action-btn" title="Reset to default key">AQ==</button>
+                </span>
+              </label>
+              <input type="text" id="watch-key" value="AQ==" class="watch-input sidebar-input font-mono">
+              <div class="sidebar-hint">Key for decrypting messages on this channel</div>
+            </div>
+          </div>
+        </div>
+
         <!-- Subscriptions Section -->
         <div class="sidebar-section">
           <button class="sidebar-section-header" data-collapse="subscriptions-body">
@@ -244,9 +264,8 @@
               <div class="sidebar-hint" id="encryption-key-hint">Default key from server config</div>
               <div class="sidebar-presets">
                 <button type="button" id="key-short-btn" class="preset-btn" title="Meshtastic Default">AQ==</button>
-                <button type="button" id="key-simple1-btn" class="preset-btn" title="Meshtastic Simple 1">Ag==</button>
-                <button type="button" id="key-simple2-btn" class="preset-btn" title="Meshtastic Simple 2">Aw==</button>
-                <button type="button" id="key-simple3-btn" class="preset-btn" title="Meshtastic Simple 3">BA==</button>
+                <button type="button" id="key-gen-128-btn" class="preset-btn" title="Generate random AES-128 key"><i class="fas fa-dice"></i> AES-128</button>
+                <button type="button" id="key-gen-256-btn" class="preset-btn" title="Generate random AES-256 key"><i class="fas fa-dice"></i> AES-256</button>
               </div>
             </div>
 
