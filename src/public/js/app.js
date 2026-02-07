@@ -1091,9 +1091,31 @@ function renderDetailPanel(data) {
   if (data.hopStart !== undefined) html += `<div class="detail-row"><div class="detail-label">Hops</div><div class="detail-value">${(data.hopStart || 0) - (data.hopLimit || 0)} / ${data.hopStart || 0}</div></div>`;
   if (data.viaMqtt !== undefined) html += `<div class="detail-row"><div class="detail-label">Via MQTT</div><div class="detail-value">${data.viaMqtt ? 'Yes' : 'No'}</div></div>`;
   if (data.text && data.portName === 'TEXT_MESSAGE') html += `<div class="detail-row"><div class="detail-label">Text</div><div class="detail-value" style="color:#e5e5e5">${escapeHtml(data.text)}</div></div>`;
+
+  // Position map
+  const hasPosition = data.portName === 'POSITION' && data.payload?.latitude && data.payload?.longitude;
+  if (hasPosition) {
+    html += `<div class="detail-row"><div class="detail-label">Location</div><div id="detail-map" style="height:200px;width:100%;border-radius:3px;border:1px solid #3c3c3c;margin-top:4px;"></div></div>`;
+  }
+
   if (data.payload && typeof data.payload === 'object') html += `<div class="detail-row"><div class="detail-label">Decoded Payload</div><div class="detail-json">${escapeHtml(JSON.stringify(data.payload, null, 2))}</div></div>`;
 
   content.innerHTML = html;
+
+  // Initialize Leaflet map after DOM insertion
+  if (hasPosition && typeof L !== 'undefined') {
+    const lat = data.payload.latitude;
+    const lon = data.payload.longitude;
+    const map = L.map('detail-map', { zoomControl: false, attributionControl: false }).setView([lat, lon], 13);
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '&copy; OpenStreetMap',
+    }).addTo(map);
+    L.marker([lat, lon]).addTo(map);
+    L.control.attribution({ prefix: false }).addAttribution('&copy; OSM').addTo(map);
+    // Leaflet needs a resize nudge since container may not be fully laid out
+    setTimeout(() => map.invalidateSize(), 100);
+  }
 }
 
 function closeDetailPanel() {
