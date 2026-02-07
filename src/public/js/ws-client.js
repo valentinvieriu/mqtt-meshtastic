@@ -63,6 +63,14 @@ export class WsClient {
         this.#handlers.onSubscribed?.(msg);
         break;
 
+      case 'unsubscribed':
+        this.#handlers.onUnsubscribed?.(msg);
+        break;
+
+      case 'subscriptions':
+        this.#handlers.onSubscriptions?.(msg);
+        break;
+
       case 'error':
         this.#handlers.onError?.(msg);
         break;
@@ -111,6 +119,19 @@ export class WsClient {
     return this.send({
       type: 'subscribe',
       topic,
+    });
+  }
+
+  unsubscribe(topic) {
+    return this.send({
+      type: 'unsubscribe',
+      topic,
+    });
+  }
+
+  getSubscriptions() {
+    return this.send({
+      type: 'get_subscriptions',
     });
   }
 

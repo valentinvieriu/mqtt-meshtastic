@@ -8,223 +8,317 @@
   <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
   <link href="/css/styles.css" rel="stylesheet">
 </head>
-<body class="h-screen flex flex-col overflow-hidden">
+<body>
 
-  <!-- Header -->
-  <header class="bg-gray-900 p-4 border-b border-gray-700 flex justify-between items-center flex-shrink-0">
-    <div>
-      <h1 class="text-xl font-bold text-green-400 flex items-center gap-2">
-        <i class="fas fa-broadcast-tower"></i> Meshtastic MQTT Client
-      </h1>
-      <p class="text-gray-400 text-xs mt-1">
-        Send encrypted messages via <span class="text-yellow-400">mqtt.meshtastic.org</span>
-      </p>
+  <!-- Menu Bar -->
+  <div class="menubar">
+    <div class="menubar-left">
+      <i class="fas fa-broadcast-tower"></i>
+      <span class="menubar-title">Meshtastic MQTT Client</span>
     </div>
-    <div class="flex items-center gap-4">
-      <div class="flex items-center gap-2 text-sm">
-        <div id="connection-status" class="w-2 h-2 rounded-full bg-yellow-500 animate-pulse"></div>
-        <span id="connection-text" class="text-gray-400">Connecting...</span>
-      </div>
-      <div class="hidden sm:block text-right">
-        <span class="text-xs font-mono text-gray-500 block">EU_868 Region</span>
-        <span class="text-xs font-mono text-gray-500 block">AES256-CTR</span>
-      </div>
+    <div class="menubar-right">
+      <span class="menubar-subtitle">Encrypted mesh messaging via MQTT</span>
     </div>
-  </header>
+  </div>
 
-  <!-- Main 3-Column Layout -->
-  <div class="flex-1 grid grid-cols-1 lg:grid-cols-12 min-h-0 overflow-hidden">
+  <!-- Main Layout: Activity Bar + Sidebar + Main -->
+  <div class="main-layout">
 
-    <!-- LEFT COLUMN: Configuration (3 cols) -->
-    <div class="lg:col-span-3 p-4 space-y-4 border-r border-gray-700 overflow-y-auto bg-gray-800">
-
-      <!-- Topic Structure Section -->
-      <div class="space-y-3">
-        <div class="flex items-center justify-between">
-          <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider flex items-center gap-2">
-            <i class="fas fa-route"></i> Topic Structure
-          </h2>
-          <span id="mode-indicator" class="text-[10px] px-2 py-0.5 rounded bg-green-600 text-white font-medium">Protobuf</span>
-        </div>
-
-        <div class="grid grid-cols-2 gap-3">
-          <div class="input-group">
-            <label class="block text-xs text-gray-500 mb-1">Root</label>
-            <input type="text" id="mqtt-root" value="msh" class="sync-input w-full bg-gray-700 border border-gray-600 rounded p-2 text-xs text-white font-mono focus:border-green-500 focus:outline-none">
-          </div>
-          <div class="input-group">
-            <label class="block text-xs text-gray-500 mb-1">Region</label>
-            <input type="text" id="region" value="EU_868" class="sync-input w-full bg-gray-700 border border-gray-600 rounded p-2 text-xs text-white font-mono focus:border-green-500 focus:outline-none">
-          </div>
-        </div>
-
-        <div class="input-group">
-          <label class="block text-xs text-gray-500 mb-1">Path (Mode)</label>
-          <div class="relative">
-            <select id="path-select" class="w-full bg-gray-700 border border-gray-600 rounded p-2 text-xs text-white focus:border-green-500 focus:outline-none appearance-none">
-              <option value="2/e">2/e (Protobuf - Encrypted)</option>
-              <option value="2/json">2/json (JSON - Unencrypted)</option>
-            </select>
-            <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-400">
-              <i class="fas fa-chevron-down text-xs"></i>
-            </div>
-          </div>
-        </div>
-
-        <div class="input-group">
-          <label class="block text-xs text-gray-500 mb-1">Channel</label>
-          <div class="relative">
-            <select id="channel-select" class="w-full bg-gray-700 border border-gray-600 rounded p-2 text-xs text-white focus:border-green-500 focus:outline-none appearance-none">
-              <option value="LongFast">LongFast (Default)</option>
-              <option value="mqtt">mqtt</option>
-              <option value="custom">Custom...</option>
-            </select>
-            <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-400">
-              <i class="fas fa-chevron-down text-xs"></i>
-            </div>
-          </div>
-          <input type="text" id="channel-custom" placeholder="Custom channel" class="sync-input hidden w-full mt-2 bg-gray-700 border border-gray-600 rounded p-2 text-xs text-white font-mono">
-        </div>
-
-        <div class="input-group">
-          <label class="block text-xs text-gray-500 mb-1">Gateway ID (Topic)</label>
-          <input type="text" id="gateway-id" value="!d844b556" class="sync-input w-full bg-gray-700 border border-gray-600 rounded p-2 text-xs text-white font-mono focus:border-green-500 focus:outline-none">
-        </div>
-      </div>
-
-      <hr class="border-gray-700">
-
-      <!-- JSON Mode Warning -->
-      <div id="json-mode-warning" class="hidden bg-yellow-900/50 border border-yellow-600 rounded-lg p-3">
-        <div class="flex items-start gap-2">
-          <i class="fas fa-exclamation-triangle text-yellow-500 mt-0.5"></i>
-          <div class="text-xs">
-            <p class="text-yellow-400 font-semibold">JSON Mode - Unencrypted</p>
-            <p class="text-yellow-300/80 mt-1">Messages are sent as plaintext JSON. Anyone with broker access can read them. The receiving gateway must have a channel named "mqtt" with Downlink enabled.</p>
-          </div>
-        </div>
-      </div>
-
-      <!-- Message Content Section -->
-      <div class="space-y-3">
-        <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider flex items-center gap-2">
-          <i class="fas fa-paper-plane"></i> Message Content
-        </h2>
-
-        <div class="grid grid-cols-2 gap-3">
-          <div class="input-group">
-            <label class="block text-xs text-gray-500 mb-1 flex items-center justify-between">
-              <span>Sender (From)</span>
-              <label class="flex items-center gap-1 cursor-pointer">
-                <input type="checkbox" id="sender-auto" checked class="w-3 h-3 rounded border-gray-500 text-green-500 focus:ring-green-500 focus:ring-offset-0 bg-gray-700">
-                <span class="text-[10px] text-gray-400">Auto</span>
-              </label>
-            </label>
-            <input type="text" id="sender-id" value="!d844b556" class="sync-input w-full bg-gray-700 border border-gray-600 rounded p-2 text-xs text-white font-mono focus:border-green-500 focus:outline-none opacity-50" disabled>
-            <div class="text-[10px] text-green-500/80 mt-1 font-mono truncate" id="sender-int">Int: -</div>
-          </div>
-          <div class="input-group">
-            <label class="block text-xs text-gray-500 mb-1">Receiver (To)</label>
-            <input type="text" id="receiver-id" value="^all" placeholder="!hex or ^all" class="sync-input w-full bg-gray-700 border border-gray-600 rounded p-2 text-xs text-white font-mono focus:border-green-500 focus:outline-none">
-            <div class="text-[10px] text-green-500/80 mt-1 font-mono truncate" id="receiver-int">Int: -</div>
-          </div>
-        </div>
-
-        <div class="input-group">
-          <label class="block text-xs text-gray-500 mb-1">Message</label>
-          <textarea id="message-text" rows="3" class="sync-input w-full bg-gray-700 border border-gray-600 rounded p-2 text-xs text-white focus:border-green-500 focus:outline-none resize-none">Hello from web!</textarea>
-        </div>
-
-        <div class="input-group" id="key-group">
-          <label class="block text-xs text-gray-500 mb-1">Encryption Key</label>
-          <input type="text" id="encryption-key" value="1PG7OiApB1nwvP+rz05pAQ==" class="sync-input w-full bg-gray-700 border border-gray-600 rounded p-2 text-xs text-white font-mono focus:border-green-500 focus:outline-none">
-          <p class="text-[10px] text-gray-500 mt-1">Default LongFast key (expanded)</p>
-        </div>
-      </div>
-
-      <!-- Send Button -->
-      <button id="send-btn" class="w-full bg-green-600 hover:bg-green-500 text-white font-semibold py-2 px-4 rounded-lg flex items-center justify-center gap-2 transition-colors text-sm">
-        <i class="fas fa-paper-plane"></i> Send Message
+    <!-- Activity Bar (far left icons) -->
+    <div class="activity-bar">
+      <button class="activity-bar-btn active" data-view="watch" title="Watch Channel">
+        <i class="fas fa-satellite-dish"></i>
       </button>
+      <button class="activity-bar-btn" data-view="send" title="Send Message">
+        <i class="fas fa-paper-plane"></i>
+      </button>
+    </div>
 
-      <hr class="border-gray-700">
+    <!-- Sidebar -->
+    <div class="sidebar" id="sidebar">
 
-      <!-- Info Panel -->
-      <div class="bg-gray-900/50 rounded-lg border border-gray-700 p-3">
-        <h3 class="text-xs font-bold text-blue-400 uppercase tracking-wide mb-2 flex items-center gap-2">
-          <i class="fas fa-info-circle"></i> Connection Info
-        </h3>
-        <ul class="space-y-1 text-[10px] text-gray-400">
-          <li><span class="text-gray-500">Broker:</span> mqtt.meshtastic.org:1883</li>
-          <li><span class="text-gray-500">Topic:</span> .../<span id="debug-channel" class="text-white">LongFast</span>/...</li>
-          <li><span class="text-gray-500">Encryption:</span> AES256-CTR</li>
-        </ul>
+      <!-- ===== Watch Sidebar ===== -->
+      <div class="sidebar-view active" id="sidebar-watch">
+        <div class="sidebar-header">WATCH</div>
+
+        <!-- Topic Section -->
+        <div class="sidebar-section">
+          <button class="sidebar-section-header" data-collapse="watch-topic-body">
+            <i class="fas fa-chevron-down sidebar-chevron"></i>
+            <span>TOPIC</span>
+            <span id="watch-mode-indicator" class="mode-badge mode-badge-proto">Protobuf</span>
+          </button>
+          <div class="sidebar-section-body" id="watch-topic-body">
+            <div class="sidebar-field-row">
+              <div class="sidebar-field">
+                <label>Root</label>
+                <input type="text" id="watch-root" value="msh" class="watch-input sidebar-input">
+              </div>
+              <div class="sidebar-field">
+                <label>Region</label>
+                <input type="text" id="watch-region" value="EU_868" class="watch-input sidebar-input">
+              </div>
+            </div>
+
+            <div class="sidebar-field">
+              <label>Path (Mode)</label>
+              <div class="sidebar-select-wrap">
+                <select id="watch-path-select" class="watch-input sidebar-input sidebar-select">
+                  <option value="2/e">2/e (Protobuf - Encrypted)</option>
+                  <option value="2/json">2/json (JSON - Unencrypted)</option>
+                </select>
+                <i class="fas fa-chevron-down sidebar-select-icon"></i>
+              </div>
+            </div>
+
+            <div class="sidebar-field">
+              <label>Channel</label>
+              <div class="sidebar-select-wrap">
+                <select id="watch-channel-select" class="watch-input sidebar-input sidebar-select">
+                  <option value="LongFast">LongFast (Default)</option>
+                  <option value="mqtt">mqtt</option>
+                  <option value="custom">Custom...</option>
+                </select>
+                <i class="fas fa-chevron-down sidebar-select-icon"></i>
+              </div>
+              <input type="text" id="watch-channel-custom" placeholder="Custom channel" class="watch-input sidebar-input hidden" style="margin-top:4px">
+            </div>
+
+            <button id="subscribe-btn" class="sidebar-btn sidebar-btn-primary">
+              <i class="fas fa-plus"></i> Subscribe
+            </button>
+          </div>
+        </div>
+
+        <!-- Subscriptions Section -->
+        <div class="sidebar-section">
+          <button class="sidebar-section-header" data-collapse="subscriptions-body">
+            <i class="fas fa-chevron-down sidebar-chevron"></i>
+            <span>SUBSCRIPTIONS</span>
+          </button>
+          <div class="sidebar-section-body" id="subscriptions-body">
+            <div id="subscription-list" class="subscription-list">
+              <span class="sidebar-empty">Loading...</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== Send Sidebar ===== -->
+      <div class="sidebar-view" id="sidebar-send">
+        <div class="sidebar-header">SEND</div>
+
+        <!-- Topic Section -->
+        <div class="sidebar-section">
+          <button class="sidebar-section-header" data-collapse="send-topic-body">
+            <i class="fas fa-chevron-down sidebar-chevron"></i>
+            <span>TOPIC</span>
+            <span id="send-mode-indicator" class="mode-badge mode-badge-proto">Protobuf</span>
+          </button>
+          <div class="sidebar-section-body" id="send-topic-body">
+            <div class="sidebar-field-row">
+              <div class="sidebar-field">
+                <label>Root</label>
+                <input type="text" id="send-root" value="msh" class="send-input sidebar-input">
+              </div>
+              <div class="sidebar-field">
+                <label>Region</label>
+                <input type="text" id="send-region" value="EU_868" class="send-input sidebar-input">
+              </div>
+            </div>
+
+            <div class="sidebar-field">
+              <label>Path (Mode)</label>
+              <div class="sidebar-select-wrap">
+                <select id="send-path-select" class="send-input sidebar-input sidebar-select">
+                  <option value="2/e">2/e (Protobuf - Encrypted)</option>
+                  <option value="2/json">2/json (JSON - Unencrypted)</option>
+                </select>
+                <i class="fas fa-chevron-down sidebar-select-icon"></i>
+              </div>
+            </div>
+
+            <div class="sidebar-field">
+              <label>Channel</label>
+              <div class="sidebar-select-wrap">
+                <select id="send-channel-select" class="send-input sidebar-input sidebar-select">
+                  <option value="LongFast">LongFast (Default)</option>
+                  <option value="mqtt">mqtt</option>
+                  <option value="custom">Custom...</option>
+                </select>
+                <i class="fas fa-chevron-down sidebar-select-icon"></i>
+              </div>
+              <input type="text" id="send-channel-custom" placeholder="Custom channel" class="send-input sidebar-input hidden" style="margin-top:4px">
+            </div>
+          </div>
+        </div>
+
+        <!-- Message Section -->
+        <div class="sidebar-section">
+          <button class="sidebar-section-header" data-collapse="send-message-body">
+            <i class="fas fa-chevron-down sidebar-chevron"></i>
+            <span>MESSAGE</span>
+          </button>
+          <div class="sidebar-section-body" id="send-message-body">
+
+            <!-- JSON Mode Warning -->
+            <div id="json-mode-warning" class="json-warning hidden">
+              <div class="json-warning-inner">
+                <i class="fas fa-exclamation-triangle"></i>
+                <div>
+                  <p class="json-warning-title">JSON Mode - Unencrypted</p>
+                  <p class="json-warning-text">Messages are sent as plaintext JSON. The receiving gateway must have a channel named "mqtt" with Downlink enabled.</p>
+                </div>
+              </div>
+            </div>
+
+            <div class="sidebar-field">
+              <label>Gateway ID</label>
+              <input type="text" id="gateway-id" value="!d844b556" class="send-input sidebar-input font-mono">
+            </div>
+
+            <div class="sidebar-field-row">
+              <div class="sidebar-field">
+                <label class="sidebar-label-with-toggle">
+                  <span>Sender</span>
+                  <label class="auto-toggle">
+                    <input type="checkbox" id="sender-auto" checked>
+                    <span>Auto</span>
+                  </label>
+                </label>
+                <input type="text" id="sender-id" value="!d844b556" class="send-input sidebar-input font-mono disabled-input" disabled>
+                <div class="sidebar-hint font-mono" id="sender-int">Int: -</div>
+              </div>
+              <div class="sidebar-field">
+                <label>Receiver</label>
+                <input type="text" id="receiver-id" value="^all" placeholder="!hex or ^all" class="send-input sidebar-input font-mono">
+                <div class="sidebar-hint font-mono" id="receiver-int">Int: -</div>
+              </div>
+            </div>
+
+            <div class="sidebar-field">
+              <label>Message</label>
+              <textarea id="message-text" rows="3" class="send-input sidebar-input sidebar-textarea">Hello from web!</textarea>
+            </div>
+
+            <div class="sidebar-field" id="key-group">
+              <label>Encryption Key</label>
+              <input type="text" id="encryption-key" value="1PG7OiApB1nwvP+rz05pAQ==" class="send-input sidebar-input font-mono">
+              <div class="sidebar-hint">Default LongFast key (expanded)</div>
+            </div>
+
+            <button id="send-btn" class="sidebar-btn sidebar-btn-send">
+              <i class="fas fa-paper-plane"></i> Send Message
+            </button>
+          </div>
+        </div>
       </div>
     </div>
 
-    <!-- MIDDLE COLUMN: Message Preview (3 cols) -->
-    <div class="lg:col-span-3 p-4 bg-gray-900 flex flex-col border-r border-gray-700 overflow-y-auto">
-      <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-3 flex items-center gap-2">
-        <i class="fas fa-code"></i> Message Preview
-      </h2>
+    <!-- ===== Main Content Area ===== -->
+    <div class="editor-area">
 
-      <!-- Topic Output -->
-      <div class="mb-3">
-        <div class="flex justify-between items-end mb-1">
-          <label class="text-xs text-gray-500">MQTT Topic</label>
-          <button id="copy-topic" class="text-[10px] text-green-400 hover:text-green-300 flex items-center gap-1">
-            <i class="far fa-copy"></i> Copy
-          </button>
+      <!-- Watch Main: Activity Log + Detail Panel -->
+      <div class="main-view active" id="main-watch">
+        <!-- Filter Bar -->
+        <div class="tab-bar">
+          <div class="tab-bar-tabs">
+            <span class="tab-bar-label"><i class="fas fa-stream"></i> Activity Log</span>
+          </div>
+          <div class="tab-bar-actions" id="filter-bar">
+            <button id="filter-all" class="filter-btn filter-active">All</button>
+            <button id="filter-text" class="filter-btn">Text</button>
+            <button id="filter-position" class="filter-btn">Position</button>
+            <button id="filter-telemetry" class="filter-btn">Telemetry</button>
+            <button id="filter-nodeinfo" class="filter-btn">Nodes</button>
+            <button id="filter-routing" class="filter-btn">Routing</button>
+            <button id="filter-neighbor" class="filter-btn">Neighbors</button>
+            <button id="clear-log" class="filter-btn filter-btn-clear" title="Clear log">
+              <i class="fas fa-trash-alt"></i>
+            </button>
+          </div>
         </div>
-        <div class="bg-black border border-gray-700 rounded p-2 font-mono text-xs break-all text-green-300">
-          <div id="out-topic">...</div>
+
+        <!-- Split: Activity + Detail -->
+        <div class="watch-split">
+          <div id="activity-log" class="activity-log">
+            <div class="placeholder">
+              <i class="fas fa-satellite-dish"></i>
+              <span>Waiting for messages...</span>
+            </div>
+          </div>
+
+          <!-- Detail Panel (hidden until a message is selected) -->
+          <div id="detail-panel" class="detail-panel hidden">
+            <div class="detail-header">
+              <span class="detail-title">Message Detail</span>
+              <button id="detail-close" class="detail-close-btn" title="Close">
+                <i class="fas fa-times"></i>
+              </button>
+            </div>
+            <div id="detail-content" class="detail-content">
+            </div>
+          </div>
         </div>
       </div>
 
-      <!-- Payload Output -->
-      <div class="flex-1 min-h-0 flex flex-col">
-        <div class="flex justify-between items-end mb-1">
-          <label id="payload-label" class="text-xs text-gray-500">Payload (before encryption)</label>
-          <button id="copy-payload" class="text-[10px] text-green-400 hover:text-green-300 flex items-center gap-1">
-            <i class="far fa-copy"></i> Copy
-          </button>
+      <!-- Send Main: Payload Preview -->
+      <div class="main-view" id="main-send">
+        <div class="tab-bar">
+          <div class="tab-bar-tabs">
+            <span class="tab-bar-label"><i class="fas fa-code"></i> Payload Preview</span>
+          </div>
+          <div class="tab-bar-actions">
+            <button id="copy-topic" class="preview-copy-btn"><i class="far fa-copy"></i> Copy Topic</button>
+            <button id="copy-payload" class="preview-copy-btn"><i class="far fa-copy"></i> Copy Payload</button>
+          </div>
         </div>
-        <div class="bg-black border border-gray-700 rounded p-2 font-mono text-xs text-blue-300 overflow-auto flex-1">
-          <pre id="out-payload" class="whitespace-pre-wrap">...</pre>
+        <div class="preview-panel">
+          <div class="preview-section">
+            <div class="preview-header">
+              <label>MQTT Topic</label>
+            </div>
+            <div class="preview-box preview-box-topic">
+              <div id="out-topic">...</div>
+            </div>
+          </div>
+          <div class="preview-section preview-section-grow">
+            <div class="preview-header">
+              <label id="payload-label">Payload (before encryption)</label>
+            </div>
+            <div class="preview-box preview-box-payload">
+              <pre id="out-payload">...</pre>
+            </div>
+          </div>
         </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Status Bar -->
+  <div class="statusbar">
+    <div class="statusbar-left">
+      <div class="statusbar-item">
+        <span id="connection-status" class="statusbar-dot dot-connecting"></span>
+        <span id="connection-text">Connecting...</span>
       </div>
     </div>
-
-    <!-- RIGHT COLUMN: Activity Log (6 cols - full height) -->
-    <div class="lg:col-span-6 p-4 bg-gray-950 flex flex-col min-h-0">
-      <div class="flex justify-between items-center mb-3">
-        <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider flex items-center gap-2">
-          <i class="fas fa-stream"></i> Activity Log
-        </h2>
-        <div class="flex flex-wrap gap-1">
-          <button id="filter-all" class="text-[10px] px-2 py-1 rounded bg-gray-700 text-white">All</button>
-          <button id="filter-text" class="text-[10px] px-2 py-1 rounded bg-gray-800 text-gray-400 hover:bg-gray-700">💬 Text</button>
-          <button id="filter-position" class="text-[10px] px-2 py-1 rounded bg-gray-800 text-gray-400 hover:bg-gray-700">📍 Position</button>
-          <button id="filter-telemetry" class="text-[10px] px-2 py-1 rounded bg-gray-800 text-gray-400 hover:bg-gray-700">📊 Telemetry</button>
-          <button id="filter-nodeinfo" class="text-[10px] px-2 py-1 rounded bg-gray-800 text-gray-400 hover:bg-gray-700">👤 Nodes</button>
-          <button id="filter-routing" class="text-[10px] px-2 py-1 rounded bg-gray-800 text-gray-400 hover:bg-gray-700">🔀 Routing</button>
-          <button id="filter-neighbor" class="text-[10px] px-2 py-1 rounded bg-gray-800 text-gray-400 hover:bg-gray-700">📡 Neighbors</button>
-          <button id="clear-log" class="text-[10px] px-2 py-1 rounded bg-red-900/50 text-red-400 hover:bg-red-800/50 ml-1" title="Clear log">
-            <i class="fas fa-trash-alt"></i> Clear
-          </button>
-        </div>
+    <div class="statusbar-right">
+      <div class="statusbar-item">
+        <i class="fas fa-globe-americas"></i> <span id="statusbar-region-text">EU_868</span>
       </div>
-      <div id="activity-log" class="bg-black border border-gray-700 rounded-lg p-2 flex-1 overflow-y-auto space-y-2 min-h-0">
-        <div class="placeholder text-xs text-gray-500 text-center py-8">
-          <i class="fas fa-satellite-dish text-2xl mb-2 block opacity-50"></i>
-          Waiting for messages...
-        </div>
+      <div class="statusbar-item">
+        <i class="fas fa-lock"></i> AES-CTR
+      </div>
+      <div class="statusbar-item">
+        <i class="fas fa-server"></i> <span id="statusbar-broker-text">mqtt.meshtastic.org</span>
       </div>
     </div>
   </div>
 
   <!-- Toast Notification -->
-  <div id="toast" class="fixed bottom-5 right-5 bg-green-600 text-white px-4 py-2 rounded shadow-lg transform translate-y-20 opacity-0 transition-all duration-300 flex items-center gap-2 z-50">
+  <div id="toast" class="toast">
     <i class="fas fa-check-circle"></i>
     <span id="toast-message">Message sent!</span>
   </div>

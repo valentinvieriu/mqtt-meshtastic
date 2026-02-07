@@ -233,6 +233,12 @@ wsServer.on('connection', (ws) => {
     connected: mqttClient.connected,
   }));
 
+  // Send active subscriptions
+  ws.send(JSON.stringify({
+    type: 'subscriptions',
+    topics: mqttClient.getSubscriptions(),
+  }));
+
   ws.on('message', async (data) => {
     try {
       const msg = JSON.parse(data.toString());
@@ -371,6 +377,22 @@ async function handleClientMessage(ws, msg) {
       const topic = msg.topic || `${config.meshtastic.mqttRoot}/${config.meshtastic.region}/#`;
       await mqttClient.subscribe(topic);
       ws.send(JSON.stringify({ type: 'subscribed', topic }));
+      broadcast({ type: 'subscriptions', topics: mqttClient.getSubscriptions() });
+      break;
+    }
+
+    case 'unsubscribe': {
+      const topic = msg.topic;
+      if (topic) {
+        await mqttClient.unsubscribe(topic);
+        ws.send(JSON.stringify({ type: 'unsubscribed', topic }));
+        broadcast({ type: 'subscriptions', topics: mqttClient.getSubscriptions() });
+      }
+      break;
+    }
+
+    case 'get_subscriptions': {
+      ws.send(JSON.stringify({ type: 'subscriptions', topics: mqttClient.getSubscriptions() }));
       break;
     }
   }

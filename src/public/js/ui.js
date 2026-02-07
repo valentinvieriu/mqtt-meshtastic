@@ -20,9 +20,9 @@ export function showToast(message, duration = 2000) {
 
   if (toastMessage) toastMessage.textContent = message;
 
-  toast.classList.remove('translate-y-20', 'opacity-0');
+  toast.classList.add('show');
   setTimeout(() => {
-    toast.classList.add('translate-y-20', 'opacity-0');
+    toast.classList.remove('show');
   }, duration);
 }
 
@@ -49,14 +49,14 @@ export function updateConnectionStatus(status) {
   const text = $('#connection-text');
 
   const states = {
-    connected: { color: 'bg-green-500', label: 'Connected' },
-    disconnected: { color: 'bg-red-500', label: 'Disconnected' },
-    connecting: { color: 'bg-yellow-500', label: 'Connecting...' },
-    error: { color: 'bg-red-500', label: 'Error' },
+    connected: { dotClass: 'dot-connected', label: 'Connected' },
+    disconnected: { dotClass: 'dot-disconnected', label: 'Disconnected' },
+    connecting: { dotClass: 'dot-connecting', label: 'Connecting...' },
+    error: { dotClass: 'dot-error', label: 'Error' },
   };
 
-  const state = states[status] || states.disconnected;
+  const s = states[status] || states.disconnected;
 
-  indicator.className = `w-2 h-2 rounded-full ${state.color}`;
-  text.textContent = state.label;
+  indicator.className = `statusbar-dot ${s.dotClass}`;
+  text.textContent = s.label;
 }

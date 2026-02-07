@@ -7,6 +7,8 @@ export function createMqttClient(handlers = {}) {
 
   console.log(`[MQTT] Connecting to ${url}...`);
 
+  const activeSubscriptions = new Set();
+
   const client = mqtt.connect(url, {
     username,
     password,
@@ -19,17 +21,20 @@ export function createMqttClient(handlers = {}) {
     console.log('[MQTT] Connected to broker');
     handlers.onConnect?.();
 
-    // Subscribe to rootTopic + channel
-    // e.g., msh/EU_868/2/e/LongFast/#
-    const topic = `${config.meshtastic.rootTopic}/${config.meshtastic.defaultChannel}/#`;
+    // Seed default topic on first connect
+    const defaultTopic = `${config.meshtastic.rootTopic}/${config.meshtastic.defaultChannel}/#`;
+    activeSubscriptions.add(defaultTopic);
 
-    client.subscribe(topic, (err) => {
-      if (err) {
-        console.error('[MQTT] Subscribe error:', err);
-      } else {
-        console.log(`[MQTT] Subscribed to: ${topic}`);
-      }
-    });
+    // Re-subscribe all tracked topics (handles reconnects)
+    for (const topic of activeSubscriptions) {
+      client.subscribe(topic, (err) => {
+        if (err) {
+          console.error(`[MQTT] Subscribe error for ${topic}:`, err);
+        } else {
+          console.log(`[MQTT] Subscribed to: ${topic}`);
+        }
+      });
+    }
   });
 
   client.on('message', (topic, message) => {
@@ -64,9 +69,28 @@ export function createMqttClient(handlers = {}) {
       return new Promise((resolve, reject) => {
         client.subscribe(topic, (err) => {
           if (err) reject(err);
-          else resolve();
+          else {
+            activeSubscriptions.add(topic);
+            resolve();
+          }
         });
       });
+    },
+
+    unsubscribe(topic) {
+      return new Promise((resolve, reject) => {
+        client.unsubscribe(topic, (err) => {
+          if (err) reject(err);
+          else {
+            activeSubscriptions.delete(topic);
+            resolve();
+          }
+        });
+      });
+    },
+
+    getSubscriptions() {
+      return Array.from(activeSubscriptions);
     },
 
     get connected() {

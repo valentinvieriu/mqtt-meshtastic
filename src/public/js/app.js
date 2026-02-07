@@ -2,29 +2,40 @@
 
 import { WsClient } from './ws-client.js';
 import { buildTopicFromComponents, parseNodeId } from './message-builder.js';
-import { $, bindInputs, copyToClipboard, updateConnectionStatus, showToast } from './ui.js';
+import { $, $$, bindInputs, copyToClipboard, updateConnectionStatus, showToast } from './ui.js';
 
-// State - will be populated from server config
+// State - separate watch and send configurations
 const state = {
-  // Decomposed topic components
-  mqttRoot: 'msh',
-  region: 'EU_868',
-  path: '2/e', // '2/e' for protobuf, '2/json' for JSON mode
-  channel: 'LongFast',
-  gatewayId: '!d844b556',
-  // Sender settings
-  senderId: '!d844b556',
-  senderAuto: true, // When true, senderId is locked to gatewayId
-  // Message content
-  receiverId: '^all',
-  message: 'Hello from web!',
-  key: '1PG7OiApB1nwvP+rz05pAQ==', // Expanded default LongFast key
-  filter: 'all', // all, text, position, telemetry
+  // Watch config (for subscribing)
+  watch: {
+    root: 'msh',
+    region: 'EU_868',
+    path: '2/e',
+    channel: 'LongFast',
+  },
+  // Send config (for publishing)
+  send: {
+    root: 'msh',
+    region: 'EU_868',
+    path: '2/e',
+    channel: 'LongFast',
+    gatewayId: '!d844b556',
+    senderId: '!d844b556',
+    senderAuto: true,
+    receiverId: '^all',
+    message: 'Hello from web!',
+    key: '1PG7OiApB1nwvP+rz05pAQ==',
+  },
+  // UI state
+  filter: 'all',
+  subscriptions: [],
+  activeView: 'watch',
+  sidebarCollapsed: false,
+  subscriptionVisibility: {},
+  selectedMessage: null, // currently selected log entry data
 };
 
 const FILTERS = ['all', 'text', 'position', 'telemetry', 'nodeinfo', 'routing', 'neighbor'];
-const FILTER_BUTTON_ACTIVE_CLASS = 'text-[10px] px-2 py-1 rounded bg-gray-700 text-white';
-const FILTER_BUTTON_IDLE_CLASS = 'text-[10px] px-2 py-1 rounded bg-gray-800 text-gray-400 hover:bg-gray-700';
 
 const FILTER_MATCHERS = {
   all: () => true,
@@ -37,30 +48,18 @@ const FILTER_MATCHERS = {
 };
 
 const ACTIVITY_PLACEHOLDER = `
-  <div class="placeholder text-xs text-gray-500 text-center py-8">
-    <i class="fas fa-satellite-dish text-2xl mb-2 block opacity-50"></i>
-    Waiting for messages...
+  <div class="placeholder">
+    <i class="fas fa-satellite-dish"></i>
+    <span>Waiting for messages...</span>
   </div>
 `;
 
 const HW_MODEL_NAMES = {
-  0: 'UNSET',
-  1: 'TLORA_V2',
-  2: 'TLORA_V1',
-  3: 'TLORA_V2_1_1P6',
-  4: 'TBEAM',
-  5: 'HELTEC_V2_0',
-  6: 'TBEAM_V0P7',
-  7: 'T_ECHO',
-  8: 'TLORA_V1_1P3',
-  9: 'RAK4631',
-  10: 'HELTEC_V2_1',
-  11: 'HELTEC_V1',
-  12: 'LILYGO_TBEAM_S3_CORE',
-  13: 'RAK11200',
-  14: 'NANO_G1',
-  15: 'TLORA_V2_1_1P8',
-  255: 'PRIVATE_HW',
+  0: 'UNSET', 1: 'TLORA_V2', 2: 'TLORA_V1', 3: 'TLORA_V2_1_1P6',
+  4: 'TBEAM', 5: 'HELTEC_V2_0', 6: 'TBEAM_V0P7', 7: 'T_ECHO',
+  8: 'TLORA_V1_1P3', 9: 'RAK4631', 10: 'HELTEC_V2_1', 11: 'HELTEC_V1',
+  12: 'LILYGO_TBEAM_S3_CORE', 13: 'RAK11200', 14: 'NANO_G1',
+  15: 'TLORA_V2_1_1P8', 255: 'PRIVATE_HW',
 };
 
 const DEFAULT_PORT_CONFIG = {
@@ -114,9 +113,7 @@ const PORT_CONFIGS = {
     icon: '📊',
     content: ({ payload }) => {
       if (!payload) return '<div class="text-gray-500 mt-1 italic">No telemetry data</div>';
-
       let html = '<div class="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-[10px]">';
-
       if (payload.deviceMetrics) {
         const dm = payload.deviceMetrics;
         if (dm.batteryLevel) html += `<div><span class="text-gray-500">Battery:</span> <span class="text-purple-300 font-mono">${dm.batteryLevel}%</span></div>`;
@@ -125,14 +122,12 @@ const PORT_CONFIGS = {
         if (dm.airUtilTx) html += `<div><span class="text-gray-500">Air Util:</span> <span class="text-purple-300 font-mono">${dm.airUtilTx.toFixed(1)}%</span></div>`;
         if (dm.uptimeSeconds) html += `<div><span class="text-gray-500">Uptime:</span> <span class="text-purple-300 font-mono">${formatUptime(dm.uptimeSeconds)}</span></div>`;
       }
-
       if (payload.environmentMetrics) {
         const em = payload.environmentMetrics;
         if (em.temperature) html += `<div><span class="text-gray-500">Temp:</span> <span class="text-purple-300 font-mono">${em.temperature.toFixed(1)}°C</span></div>`;
         if (em.relativeHumidity) html += `<div><span class="text-gray-500">Humidity:</span> <span class="text-purple-300 font-mono">${em.relativeHumidity.toFixed(0)}%</span></div>`;
         if (em.barometricPressure) html += `<div><span class="text-gray-500">Pressure:</span> <span class="text-purple-300 font-mono">${em.barometricPressure.toFixed(0)}hPa</span></div>`;
       }
-
       html += '</div>';
       return html;
     },
@@ -155,67 +150,43 @@ const PORT_CONFIGS = {
     },
   },
   ROUTING: {
-    bgClass: 'bg-amber-900/30',
-    borderClass: 'border-amber-600',
-    iconClass: 'text-amber-400',
-    labelClass: 'text-amber-400',
-    icon: '🔀',
+    bgClass: 'bg-amber-900/30', borderClass: 'border-amber-600',
+    iconClass: 'text-amber-400', labelClass: 'text-amber-400', icon: '🔀',
     content: ({ payload }) => {
       if (!payload) return '<div class="text-gray-500 mt-1 text-[10px] italic">Routing message</div>';
       let html = '<div class="mt-2 text-[10px]">';
-      if (payload.errorReason && payload.errorReason !== 0) {
-        html += `<div class="text-red-400"><span class="text-gray-500">Error:</span> ${payload.errorName || payload.errorReason}</div>`;
-      }
-      if (payload.routeRequest && payload.routeRequest.route?.length > 0) {
-        html += `<div><span class="text-gray-500">Route Request:</span> <span class="text-amber-300 font-mono">${payload.routeRequest.route.map(n => formatNodeIdShort(n)).join(' → ')}</span></div>`;
-      }
-      if (payload.routeReply && payload.routeReply.route?.length > 0) {
-        html += `<div><span class="text-gray-500">Route Reply:</span> <span class="text-amber-300 font-mono">${payload.routeReply.route.map(n => formatNodeIdShort(n)).join(' → ')}</span></div>`;
-      }
+      if (payload.errorReason && payload.errorReason !== 0) html += `<div class="text-red-400"><span class="text-gray-500">Error:</span> ${payload.errorName || payload.errorReason}</div>`;
+      if (payload.routeRequest?.route?.length > 0) html += `<div><span class="text-gray-500">Route Request:</span> <span class="text-amber-300 font-mono">${payload.routeRequest.route.map(n => formatNodeIdShort(n)).join(' → ')}</span></div>`;
+      if (payload.routeReply?.route?.length > 0) html += `<div><span class="text-gray-500">Route Reply:</span> <span class="text-amber-300 font-mono">${payload.routeReply.route.map(n => formatNodeIdShort(n)).join(' → ')}</span></div>`;
       html += '</div>';
       return html;
     },
   },
   TRACEROUTE: {
-    bgClass: 'bg-amber-900/30',
-    borderClass: 'border-amber-500',
-    iconClass: 'text-amber-400',
-    labelClass: 'text-amber-400',
-    icon: '🔍',
+    bgClass: 'bg-amber-900/30', borderClass: 'border-amber-500',
+    iconClass: 'text-amber-400', labelClass: 'text-amber-400', icon: '🔍',
     content: ({ payload }) => {
       if (!payload) return '<div class="text-gray-500 mt-1 text-[10px] italic">Traceroute message</div>';
       let html = '<div class="mt-2 text-[10px]">';
       if (payload.route?.length > 0) {
         html += `<div><span class="text-gray-500">Route:</span> <span class="text-amber-300 font-mono">${payload.route.map(n => formatNodeIdShort(n)).join(' → ')}</span></div>`;
-        if (payload.snrTowards?.length > 0) {
-          html += `<div><span class="text-gray-500">SNR:</span> <span class="text-amber-300 font-mono">${payload.snrTowards.map(s => s + 'dB').join(', ')}</span></div>`;
-        }
+        if (payload.snrTowards?.length > 0) html += `<div><span class="text-gray-500">SNR:</span> <span class="text-amber-300 font-mono">${payload.snrTowards.map(s => s + 'dB').join(', ')}</span></div>`;
       }
-      if (payload.routeBack?.length > 0) {
-        html += `<div><span class="text-gray-500">Route Back:</span> <span class="text-amber-300 font-mono">${payload.routeBack.map(n => formatNodeIdShort(n)).join(' → ')}</span></div>`;
-      }
+      if (payload.routeBack?.length > 0) html += `<div><span class="text-gray-500">Route Back:</span> <span class="text-amber-300 font-mono">${payload.routeBack.map(n => formatNodeIdShort(n)).join(' → ')}</span></div>`;
       html += '</div>';
       return html;
     },
   },
   NEIGHBORINFO: {
-    bgClass: 'bg-indigo-900/30',
-    borderClass: 'border-indigo-500',
-    iconClass: 'text-indigo-400',
-    labelClass: 'text-indigo-400',
-    icon: '📡',
+    bgClass: 'bg-indigo-900/30', borderClass: 'border-indigo-500',
+    iconClass: 'text-indigo-400', labelClass: 'text-indigo-400', icon: '📡',
     content: ({ payload }) => {
       if (!payload) return '<div class="text-gray-500 mt-1 text-[10px] italic">Neighbor info</div>';
       let html = '<div class="mt-2 text-[10px]">';
-      if (payload.nodeId) {
-        html += `<div><span class="text-gray-500">Node:</span> <span class="text-indigo-300 font-mono">${formatNodeIdShort(payload.nodeId)}</span></div>`;
-      }
+      if (payload.nodeId) html += `<div><span class="text-gray-500">Node:</span> <span class="text-indigo-300 font-mono">${formatNodeIdShort(payload.nodeId)}</span></div>`;
       if (payload.neighbors?.length > 0) {
-        html += `<div class="mt-1"><span class="text-gray-500">Neighbors (${payload.neighbors.length}):</span></div>`;
-        html += '<div class="ml-2 space-y-0.5">';
-        payload.neighbors.forEach((n) => {
-          html += `<div class="text-indigo-300 font-mono">${formatNodeIdShort(n.nodeId)} <span class="text-gray-500">SNR:</span> ${n.snr?.toFixed(1) || '?'}dB</div>`;
-        });
+        html += `<div class="mt-1"><span class="text-gray-500">Neighbors (${payload.neighbors.length}):</span></div><div class="ml-2 space-y-0.5">`;
+        payload.neighbors.forEach(n => { html += `<div class="text-indigo-300 font-mono">${formatNodeIdShort(n.nodeId)} <span class="text-gray-500">SNR:</span> ${n.snr?.toFixed(1) || '?'}dB</div>`; });
         html += '</div>';
       }
       html += '</div>';
@@ -223,11 +194,8 @@ const PORT_CONFIGS = {
     },
   },
   MAP_REPORT: {
-    bgClass: 'bg-teal-900/30',
-    borderClass: 'border-teal-500',
-    iconClass: 'text-teal-400',
-    labelClass: 'text-teal-400',
-    icon: '🗺️',
+    bgClass: 'bg-teal-900/30', borderClass: 'border-teal-500',
+    iconClass: 'text-teal-400', labelClass: 'text-teal-400', icon: '🗺️',
     content: ({ payload }) => {
       if (!payload) return '<div class="text-gray-500 mt-1 text-[10px] italic">Map report</div>';
       let html = '<div class="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-[10px]">';
@@ -241,86 +209,59 @@ const PORT_CONFIGS = {
       if (payload.firmwareVersion) html += `<div><span class="text-gray-500">FW:</span> <span class="text-teal-300 font-mono">${escapeHtml(payload.firmwareVersion)}</span></div>`;
       if (payload.numOnlineLocalNodes) html += `<div><span class="text-gray-500">Online:</span> <span class="text-teal-300">${payload.numOnlineLocalNodes} nodes</span></div>`;
       html += '</div>';
-      if (payload.latitude && payload.longitude) {
-        html += `<a href="https://www.google.com/maps?q=${payload.latitude},${payload.longitude}" target="_blank" class="mt-2 inline-block text-[10px] text-blue-400 hover:text-blue-300"><i class="fas fa-external-link-alt"></i> Open in Maps</a>`;
-      }
+      if (payload.latitude && payload.longitude) html += `<a href="https://www.google.com/maps?q=${payload.latitude},${payload.longitude}" target="_blank" class="mt-2 inline-block text-[10px] text-blue-400 hover:text-blue-300"><i class="fas fa-external-link-alt"></i> Open in Maps</a>`;
       return html;
     },
   },
-  ENCRYPTED: {
-    bgClass: 'bg-gray-800/50',
-    borderClass: 'border-gray-600',
-    iconClass: 'text-gray-500',
-    labelClass: 'text-gray-500',
-    icon: '🔒',
-    content: () => '<div class="text-gray-500 mt-1 text-[10px] italic">Encrypted (different key)</div>',
-  },
-  ADMIN: {
-    bgClass: 'bg-red-900/30',
-    borderClass: 'border-red-600',
-    iconClass: 'text-red-400',
-    labelClass: 'text-red-400',
-    icon: '⚙️',
-    content: () => '<div class="text-gray-500 mt-1 text-[10px] italic">Admin message</div>',
-  },
-  WAYPOINT: {
-    bgClass: 'bg-pink-900/30',
-    borderClass: 'border-pink-500',
-    iconClass: 'text-pink-400',
-    labelClass: 'text-pink-400',
-    icon: '📌',
-    content: () => '<div class="text-gray-500 mt-1 text-[10px] italic">Waypoint</div>',
-  },
-  STORE_FORWARD: {
-    bgClass: 'bg-orange-900/30',
-    borderClass: 'border-orange-500',
-    iconClass: 'text-orange-400',
-    labelClass: 'text-orange-400',
-    icon: '💾',
-    content: () => '<div class="text-gray-500 mt-1 text-[10px] italic">Store & Forward</div>',
-  },
-  RANGE_TEST: {
-    bgClass: 'bg-lime-900/30',
-    borderClass: 'border-lime-500',
-    iconClass: 'text-lime-400',
-    labelClass: 'text-lime-400',
-    icon: '📏',
-    content: () => '<div class="text-gray-500 mt-1 text-[10px] italic">Range test</div>',
-  },
-  DETECTION_SENSOR: {
-    bgClass: 'bg-rose-900/30',
-    borderClass: 'border-rose-500',
-    iconClass: 'text-rose-400',
-    labelClass: 'text-rose-400',
-    icon: '🚨',
-    content: () => '<div class="text-gray-500 mt-1 text-[10px] italic">Detection sensor</div>',
-  },
+  ENCRYPTED: { bgClass: 'bg-gray-800/50', borderClass: 'border-gray-600', iconClass: 'text-gray-500', labelClass: 'text-gray-500', icon: '🔒', content: () => '<div class="text-gray-500 mt-1 text-[10px] italic">Encrypted (different key)</div>' },
+  ADMIN: { bgClass: 'bg-red-900/30', borderClass: 'border-red-600', iconClass: 'text-red-400', labelClass: 'text-red-400', icon: '⚙️', content: () => '<div class="text-gray-500 mt-1 text-[10px] italic">Admin message</div>' },
+  WAYPOINT: { bgClass: 'bg-pink-900/30', borderClass: 'border-pink-500', iconClass: 'text-pink-400', labelClass: 'text-pink-400', icon: '📌', content: () => '<div class="text-gray-500 mt-1 text-[10px] italic">Waypoint</div>' },
+  STORE_FORWARD: { bgClass: 'bg-orange-900/30', borderClass: 'border-orange-500', iconClass: 'text-orange-400', labelClass: 'text-orange-400', icon: '💾', content: () => '<div class="text-gray-500 mt-1 text-[10px] italic">Store & Forward</div>' },
+  RANGE_TEST: { bgClass: 'bg-lime-900/30', borderClass: 'border-lime-500', iconClass: 'text-lime-400', labelClass: 'text-lime-400', icon: '📏', content: () => '<div class="text-gray-500 mt-1 text-[10px] italic">Range test</div>' },
+  DETECTION_SENSOR: { bgClass: 'bg-rose-900/30', borderClass: 'border-rose-500', iconClass: 'text-rose-400', labelClass: 'text-rose-400', icon: '🚨', content: () => '<div class="text-gray-500 mt-1 text-[10px] italic">Detection sensor</div>' },
 };
 
 let wsClient = null;
 
-// Fetch config from server and initialize
+// =============== Init ===============
+
 async function init() {
   try {
     const res = await fetch('/api/config');
     const config = await res.json();
 
-    // Load decomposed topic components
-    state.mqttRoot = config.mqttRoot || 'msh';
-    state.region = config.region || 'EU_868';
-    state.path = config.defaultPath || '2/e';
-    state.channel = config.defaultChannel;
-    state.gatewayId = config.gatewayId;
-    state.senderId = config.gatewayId; // Start with sender = gateway
+    // Populate both watch and send with server defaults
+    state.watch.root = config.mqttRoot || 'msh';
+    state.watch.region = config.region || 'EU_868';
+    state.watch.path = config.defaultPath || '2/e';
+    state.watch.channel = config.defaultChannel || 'LongFast';
 
-    // Update UI with config values
-    $('#mqtt-root').value = state.mqttRoot;
-    $('#region').value = state.region;
-    $('#path-select').value = state.path;
-    $('#gateway-id').value = state.gatewayId;
-    $('#sender-id').value = state.senderId;
+    state.send.root = config.mqttRoot || 'msh';
+    state.send.region = config.region || 'EU_868';
+    state.send.path = config.defaultPath || '2/e';
+    state.send.channel = config.defaultChannel || 'LongFast';
+    state.send.gatewayId = config.gatewayId || '!ffffffff';
+    state.send.senderId = config.gatewayId || '!ffffffff';
 
-    // Connect to WebSocket
+    // Populate Watch inputs
+    $('#watch-root').value = state.watch.root;
+    $('#watch-region').value = state.watch.region;
+    $('#watch-path-select').value = state.watch.path;
+
+    // Populate Send inputs
+    $('#send-root').value = state.send.root;
+    $('#send-region').value = state.send.region;
+    $('#send-path-select').value = state.send.path;
+    $('#gateway-id').value = state.send.gatewayId;
+    $('#sender-id').value = state.send.senderId;
+
+    // Status bar
+    const regionText = $('#statusbar-region-text');
+    if (regionText) regionText.textContent = state.watch.region;
+    const brokerText = $('#statusbar-broker-text');
+    if (brokerText && config.mqttHost) brokerText.textContent = config.mqttHost;
+
+    // WebSocket
     const wsUrl = `ws://${location.hostname}:${config.wsPort}`;
     wsClient = new WsClient(wsUrl);
 
@@ -331,9 +272,19 @@ async function init() {
         showToast(`Sent! ID: ${packetId}`);
         addToLog('out', { text, topic });
       })
-      .on('onError', ({ message }) => {
-        showToast(`Error: ${message}`);
-      });
+      .on('onSubscribed', ({ topic }) => showToast(`Subscribed: ${topic}`))
+      .on('onUnsubscribed', ({ topic }) => showToast(`Unsubscribed: ${topic}`))
+      .on('onSubscriptions', ({ topics }) => {
+        state.subscriptions = topics || [];
+        for (const t of state.subscriptions) {
+          if (!(t in state.subscriptionVisibility)) state.subscriptionVisibility[t] = true;
+        }
+        for (const t of Object.keys(state.subscriptionVisibility)) {
+          if (!state.subscriptions.includes(t)) delete state.subscriptionVisibility[t];
+        }
+        renderSubscriptions();
+      })
+      .on('onError', ({ message }) => showToast(`Error: ${message}`));
 
     wsClient.connect();
   } catch (err) {
@@ -341,111 +292,256 @@ async function init() {
     showToast('Failed to connect to server');
   }
 
-  // Bind UI
-  bindInputs('.sync-input', syncState);
+  // Bind inputs
+  bindInputs('.watch-input', syncWatchState);
+  bindInputs('.send-input', syncSendState);
 
-  // Path select (determines mode)
-  $('#path-select').addEventListener('change', () => {
-    syncState();
-    updateModeUI();
+  // Watch path/channel selects
+  $('#watch-path-select').addEventListener('change', () => {
+    syncWatchState();
+    updateWatchModeUI();
+  });
+  $('#watch-channel-select').addEventListener('change', () => {
+    syncWatchState();
+    if ($('#watch-channel-select').value === 'custom') $('#watch-channel-custom').focus();
   });
 
-  // Channel select
-  $('#channel-select').addEventListener('change', () => {
-    syncState();
-    if ($('#channel-select').value === 'custom') {
-      $('#channel-custom').focus();
-    }
+  // Send path/channel selects
+  $('#send-path-select').addEventListener('change', () => {
+    syncSendState();
+    updateSendModeUI();
+    generatePreview();
+  });
+  $('#send-channel-select').addEventListener('change', () => {
+    syncSendState();
+    if ($('#send-channel-select').value === 'custom') $('#send-channel-custom').focus();
+    generatePreview();
   });
 
-  // Sender auto checkbox
+  // Sender auto
   $('#sender-auto').addEventListener('change', () => {
-    syncState();
+    syncSendState();
     updateSenderUI();
+    generatePreview();
   });
 
-  $('#copy-topic').addEventListener('click', () => {
-    copyToClipboard($('#out-topic').textContent);
-  });
+  // Copy buttons
+  $('#copy-topic').addEventListener('click', () => copyToClipboard($('#out-topic').textContent));
+  $('#copy-payload').addEventListener('click', () => copyToClipboard($('#out-payload').textContent));
 
-  $('#copy-payload').addEventListener('click', () => {
-    copyToClipboard($('#out-payload').textContent);
-  });
-
+  // Send / Subscribe
   $('#send-btn').addEventListener('click', sendMessage);
+  $('#subscribe-btn').addEventListener('click', subscribeFromInputs);
 
-  // Filter buttons
+  // Activity bar
+  setupActivityBar();
+
+  // Sidebar sections
+  setupSidebarSections();
+
+  // Filters
   setupFilterButtons();
-
-  // Clear button
   $('#clear-log')?.addEventListener('click', clearLog);
 
-  // Initial UI state
-  updateModeUI();
-  updateSenderUI();
+  // Detail panel close
+  $('#detail-close')?.addEventListener('click', closeDetailPanel);
 
-  // Initial render
-  generate();
+  // Initial UI
+  updateWatchModeUI();
+  updateSendModeUI();
+  updateSenderUI();
+  generatePreview();
 }
 
-// Update UI based on mode (protobuf vs JSON)
-function updateModeUI() {
-  const isJsonMode = state.path === '2/json';
+// =============== Activity Bar ===============
+
+function setupActivityBar() {
+  $$('.activity-bar-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const view = btn.dataset.view;
+
+      if (state.activeView === view) {
+        state.sidebarCollapsed = !state.sidebarCollapsed;
+        const sidebar = $('#sidebar');
+        if (state.sidebarCollapsed) {
+          sidebar.classList.add('collapsed');
+          btn.classList.remove('active');
+        } else {
+          sidebar.classList.remove('collapsed');
+          btn.classList.add('active');
+        }
+        return;
+      }
+
+      state.activeView = view;
+      state.sidebarCollapsed = false;
+
+      $$('.activity-bar-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      $('#sidebar').classList.remove('collapsed');
+
+      // Switch sidebar view
+      $$('.sidebar-view').forEach(v => v.classList.remove('active'));
+      $(`#sidebar-${view}`).classList.add('active');
+
+      // Switch main view
+      $$('.main-view').forEach(v => v.classList.remove('active'));
+      $(`#main-${view}`).classList.add('active');
+    });
+  });
+}
+
+// =============== Sidebar Sections ===============
+
+function setupSidebarSections() {
+  $$('.sidebar-section-header[data-collapse]').forEach(header => {
+    header.addEventListener('click', () => {
+      const bodyId = header.dataset.collapse;
+      const body = $(`#${bodyId}`);
+      if (!body) return;
+      const isCollapsed = header.classList.toggle('collapsed');
+      body.classList.toggle('collapsed-body', isCollapsed);
+    });
+  });
+}
+
+// =============== Watch State ===============
+
+function syncWatchState() {
+  state.watch.root = $('#watch-root')?.value || 'msh';
+  state.watch.region = $('#watch-region')?.value || 'EU_868';
+  state.watch.path = $('#watch-path-select')?.value || '2/e';
+
+  const channelSelect = $('#watch-channel-select');
+  if (channelSelect.value === 'custom') {
+    state.watch.channel = $('#watch-channel-custom').value || 'LongFast';
+    $('#watch-channel-custom').classList.remove('hidden');
+  } else {
+    state.watch.channel = channelSelect.value;
+    $('#watch-channel-custom').classList.add('hidden');
+  }
+}
+
+function updateWatchModeUI() {
+  const isJson = state.watch.path === '2/json';
+  const indicator = $('#watch-mode-indicator');
+  if (indicator) {
+    indicator.textContent = isJson ? 'JSON' : 'Protobuf';
+    indicator.className = `mode-badge ${isJson ? 'mode-badge-json' : 'mode-badge-proto'}`;
+  }
+}
+
+// =============== Send State ===============
+
+function syncSendState() {
+  state.send.root = $('#send-root')?.value || 'msh';
+  state.send.region = $('#send-region')?.value || 'EU_868';
+  state.send.path = $('#send-path-select')?.value || '2/e';
+  state.send.gatewayId = $('#gateway-id').value;
+
+  const channelSelect = $('#send-channel-select');
+  if (channelSelect.value === 'custom') {
+    state.send.channel = $('#send-channel-custom').value || 'LongFast';
+    $('#send-channel-custom').classList.remove('hidden');
+  } else {
+    state.send.channel = channelSelect.value;
+    $('#send-channel-custom').classList.add('hidden');
+  }
+
+  state.send.senderAuto = $('#sender-auto')?.checked ?? true;
+  if (state.send.senderAuto) {
+    state.send.senderId = state.send.gatewayId;
+  } else {
+    state.send.senderId = $('#sender-id')?.value || state.send.gatewayId;
+  }
+
+  state.send.receiverId = $('#receiver-id').value;
+  state.send.message = $('#message-text').value;
+  state.send.key = $('#encryption-key')?.value || 'AQ==';
+
+  generatePreview();
+}
+
+function updateSendModeUI() {
+  const isJson = state.send.path === '2/json';
+  const indicator = $('#send-mode-indicator');
+  if (indicator) {
+    indicator.textContent = isJson ? 'JSON' : 'Protobuf';
+    indicator.className = `mode-badge ${isJson ? 'mode-badge-json' : 'mode-badge-proto'}`;
+  }
+
+  // Hide key in JSON mode
   const keyGroup = $('#key-group');
+  if (keyGroup) keyGroup.style.display = isJson ? 'none' : 'block';
+
+  // Show/hide JSON warning
   const jsonWarning = $('#json-mode-warning');
-  const modeIndicator = $('#mode-indicator');
-
-  // Hide encryption key in JSON mode
-  if (keyGroup) {
-    keyGroup.style.display = isJsonMode ? 'none' : 'block';
-  }
-
-  // Show JSON mode warning
   if (jsonWarning) {
-    jsonWarning.style.display = isJsonMode ? 'block' : 'none';
+    if (isJson) jsonWarning.classList.remove('hidden');
+    else jsonWarning.classList.add('hidden');
   }
 
-  // Update mode indicator
-  if (modeIndicator) {
-    if (isJsonMode) {
-      modeIndicator.textContent = 'JSON';
-      modeIndicator.className = 'text-[10px] px-2 py-0.5 rounded bg-yellow-600 text-white font-medium';
-    } else {
-      modeIndicator.textContent = 'Protobuf';
-      modeIndicator.className = 'text-[10px] px-2 py-0.5 rounded bg-green-600 text-white font-medium';
-    }
-  }
-
-  // In JSON mode, auto-select 'mqtt' channel
-  if (isJsonMode) {
-    const channelSelect = $('#channel-select');
+  // Auto-select mqtt channel in JSON mode
+  if (isJson) {
+    const channelSelect = $('#send-channel-select');
     if (channelSelect && channelSelect.value !== 'mqtt') {
       channelSelect.value = 'mqtt';
-      state.channel = 'mqtt';
-      $('#channel-custom').classList.add('hidden');
+      state.send.channel = 'mqtt';
+      $('#send-channel-custom').classList.add('hidden');
     }
   }
 }
 
-// Update sender field based on auto checkbox
 function updateSenderUI() {
   const senderInput = $('#sender-id');
-  const autoCheckbox = $('#sender-auto');
-
-  if (senderInput && autoCheckbox) {
-    if (state.senderAuto) {
-      senderInput.value = state.gatewayId;
-      senderInput.disabled = true;
-      senderInput.classList.add('opacity-50');
-      state.senderId = state.gatewayId;
-    } else {
-      senderInput.disabled = false;
-      senderInput.classList.remove('opacity-50');
-    }
+  if (state.send.senderAuto) {
+    senderInput.value = state.send.gatewayId;
+    senderInput.disabled = true;
+    senderInput.classList.add('disabled-input');
+    state.send.senderId = state.send.gatewayId;
+  } else {
+    senderInput.disabled = false;
+    senderInput.classList.remove('disabled-input');
   }
 }
 
-// Setup filter buttons
+// =============== Preview ===============
+
+function generatePreview() {
+  const s = state.send;
+  const isJson = s.path === '2/json';
+
+  const topic = buildTopicFromComponents({
+    root: s.root, region: s.region, path: s.path, channel: s.channel, gatewayId: s.gatewayId,
+  });
+
+  let preview;
+  if (isJson) {
+    preview = { from: parseNodeId(s.senderId), to: parseNodeId(s.receiverId), type: 'sendtext', payload: s.message };
+  } else {
+    preview = {
+      serviceEnvelope: {
+        packet: { from: s.senderId, to: s.receiverId, channel: 0, hopLimit: 0, viaMqtt: true, encrypted: '<AES256-CTR encrypted Data>' },
+        channelId: s.channel, gatewayId: s.gatewayId,
+      },
+      dataPayload: { portnum: 1, payload: s.message },
+    };
+  }
+
+  $('#out-topic').textContent = topic;
+  $('#out-payload').textContent = JSON.stringify(preview, null, 2);
+
+  const payloadLabel = $('#payload-label');
+  if (payloadLabel) payloadLabel.textContent = isJson ? 'Payload (JSON - unencrypted)' : 'Payload (before encryption)';
+
+  const senderInt = $('#sender-int');
+  const receiverInt = $('#receiver-int');
+  if (senderInt) senderInt.textContent = `Int: ${parseNodeId(s.senderId)}`;
+  if (receiverInt) receiverInt.textContent = `Int: ${parseNodeId(s.receiverId)}`;
+}
+
+// =============== Filters ===============
+
 function setupFilterButtons() {
   FILTERS.forEach(filter => {
     const btn = $(`#filter-${filter}`);
@@ -462,13 +558,7 @@ function setupFilterButtons() {
 function updateFilterButtons() {
   FILTERS.forEach(filter => {
     const btn = $(`#filter-${filter}`);
-    if (btn) {
-      if (filter === state.filter) {
-        btn.className = FILTER_BUTTON_ACTIVE_CLASS;
-      } else {
-        btn.className = FILTER_BUTTON_IDLE_CLASS;
-      }
-    }
+    if (btn) btn.classList.toggle('filter-active', filter === state.filter);
   });
 }
 
@@ -476,93 +566,86 @@ function applyFilter() {
   const log = $('#activity-log');
   if (!log) return;
 
-  const entries = log.querySelectorAll('[data-portname]');
-  entries.forEach(entry => {
+  log.querySelectorAll('[data-portname]').forEach(entry => {
     const portName = entry.dataset.portname;
+    const topic = entry.dataset.topic || '';
     const matcher = FILTER_MATCHERS[state.filter] || FILTER_MATCHERS.all;
-    const show = matcher(portName);
-
-    entry.style.display = show ? 'block' : 'none';
+    entry.style.display = (matcher(portName) && isTopicVisible(topic)) ? 'block' : 'none';
   });
+}
+
+function isTopicVisible(msgTopic) {
+  if (!msgTopic) return true;
+  for (const [subTopic, visible] of Object.entries(state.subscriptionVisibility)) {
+    if (topicMatchesSubscription(msgTopic, subTopic)) return visible;
+  }
+  return true;
+}
+
+function topicMatchesSubscription(msgTopic, subTopic) {
+  if (subTopic.endsWith('#')) return msgTopic.startsWith(subTopic.slice(0, -1));
+  return msgTopic === subTopic;
 }
 
 function clearLog() {
   const log = $('#activity-log');
   if (!log) return;
-
   log.innerHTML = ACTIVITY_PLACEHOLDER;
+  closeDetailPanel();
 }
 
-// Handle incoming MQTT messages (decoded by server)
+// =============== Messages ===============
+
 function handleIncomingMessage(msg) {
-  // Debug: log the full message
   console.log('[MSG]', msg);
 
   if (msg.type === 'raw_message') {
     console.log('[RAW]', msg.topic, msg.payloadHex);
-    addToLog('in', {
-      text: `[raw ${msg.size}B] ${msg.payloadHex?.substring(0, 30)}...`,
-      topic: msg.topic,
-      raw: true,
-    });
+    addToLog('in', { text: `[raw ${msg.size}B] ${msg.payloadHex?.substring(0, 30)}...`, topic: msg.topic, raw: true });
     return;
   }
 
-  // Handle both 'message' type from server
   const from = msg.from || '?';
   const to = msg.to || '?';
   const channelId = msg.channelId || msg.channel || '?';
   const text = msg.text;
   const portName = msg.portName || 'UNKNOWN';
   const decryptionStatus = msg.decryptionStatus || 'unknown';
-  const packetId = msg.packetId;
-  const payload = msg.payload; // Decoded Position, Telemetry, NodeInfo
-
-  console.log(`[${channelId}] ${from} → ${to}: ${text || `[${portName}]`} (${decryptionStatus})`);
 
   addToLog('in', {
-    from,
-    to,
-    channel: channelId,
-    text: text || `[${portName}]`,
-    portName,
-    portnum: msg.portnum,
-    decryptionStatus,
-    packetId,
-    payload,
-    hopLimit: msg.hopLimit,
-    hopStart: msg.hopStart,
-    viaMqtt: msg.viaMqtt,
+    from, to, channel: channelId, text: text || `[${portName}]`,
+    portName, portnum: msg.portnum, decryptionStatus,
+    packetId: msg.packetId, payload: msg.payload,
+    hopLimit: msg.hopLimit, hopStart: msg.hopStart, viaMqtt: msg.viaMqtt,
+    topic: msg.topic, gatewayId: msg.gatewayId, timestamp: msg.timestamp,
   });
 }
 
-// Add message to activity log
 function addToLog(direction, data) {
   const log = $('#activity-log');
   if (!log) return;
 
-  // Remove "waiting" placeholder if present
   const placeholder = log.querySelector('.placeholder');
   if (placeholder) placeholder.remove();
 
   const entry = document.createElement('div');
   const isIn = direction === 'in';
   entry.dataset.portname = data.portName || 'sent';
+  if (data.topic) entry.dataset.topic = data.topic;
 
-  const arrow = isIn ? '←' : '→';
+  // Store full data on the element for detail panel
+  entry._messageData = data;
+
   const time = new Date().toLocaleTimeString();
 
   if (isIn && data.from) {
-    // Decryption status indicator
     const statusIcon = data.decryptionStatus === 'success' ? '🔓' :
                        data.decryptionStatus === 'failed' ? '🔒' :
                        data.decryptionStatus === 'plaintext' ? '📝' : '❓';
 
-    // Port-specific styling and content
     const portConfig = getPortConfig(data.portName, data.payload, data.text);
 
     entry.className = `text-xs p-2 rounded ${portConfig.bgClass} border-l-2 ${portConfig.borderClass}`;
-
     entry.innerHTML = `
       <div class="flex justify-between items-start gap-2">
         <div class="flex items-center gap-2">
@@ -598,31 +681,120 @@ function addToLog(direction, data) {
     entry.innerHTML = `
       <div class="flex justify-between">
         <span class="text-gray-500 text-[10px]">${time}</span>
-        <span class="text-green-400 text-[10px]">${arrow} sent</span>
+        <span class="text-green-400 text-[10px]">→ sent</span>
       </div>
       <div class="text-gray-200 mt-1">${escapeHtml(data.text)}</div>
     `;
   }
 
-  log.insertBefore(entry, log.firstChild);
+  // Click to open detail panel
+  entry.addEventListener('click', () => selectLogEntry(entry));
 
-  // Apply current filter
+  log.insertBefore(entry, log.firstChild);
   applyFilter();
 
-  // Keep only last 200 entries
-  while (log.children.length > 200) {
-    log.removeChild(log.lastChild);
-  }
+  while (log.children.length > 200) log.removeChild(log.lastChild);
 }
 
-// Get port-specific configuration for display
+// =============== Detail Panel ===============
+
+function selectLogEntry(entry) {
+  // Remove previous selection
+  const log = $('#activity-log');
+  log.querySelectorAll('.selected').forEach(el => el.classList.remove('selected'));
+
+  entry.classList.add('selected');
+  const data = entry._messageData;
+  if (!data) return;
+
+  state.selectedMessage = data;
+  renderDetailPanel(data);
+}
+
+function renderDetailPanel(data) {
+  const panel = $('#detail-panel');
+  const content = $('#detail-content');
+  if (!panel || !content) return;
+
+  panel.classList.remove('hidden');
+
+  let html = '';
+
+  // Routing info
+  if (data.from) {
+    html += `
+      <div class="detail-row">
+        <div class="detail-label">From</div>
+        <div class="detail-value">${escapeHtml(data.from)}</div>
+      </div>
+      <div class="detail-row">
+        <div class="detail-label">To</div>
+        <div class="detail-value">${escapeHtml(data.to)}</div>
+      </div>
+    `;
+  }
+
+  if (data.channel) {
+    html += `<div class="detail-row"><div class="detail-label">Channel</div><div class="detail-value">${escapeHtml(data.channel)}</div></div>`;
+  }
+
+  if (data.gatewayId) {
+    html += `<div class="detail-row"><div class="detail-label">Gateway</div><div class="detail-value">${escapeHtml(data.gatewayId)}</div></div>`;
+  }
+
+  if (data.topic) {
+    html += `<div class="detail-row"><div class="detail-label">Topic</div><div class="detail-value" style="font-size:10px">${escapeHtml(data.topic)}</div></div>`;
+  }
+
+  if (data.portName) {
+    html += `<div class="detail-row"><div class="detail-label">Port</div><div class="detail-value">${escapeHtml(data.portName)} (${data.portnum ?? '?'})</div></div>`;
+  }
+
+  if (data.packetId) {
+    html += `<div class="detail-row"><div class="detail-label">Packet ID</div><div class="detail-value">${data.packetId}</div></div>`;
+  }
+
+  if (data.decryptionStatus) {
+    const statusColors = { success: '#89d185', failed: '#f44747', plaintext: '#cca700' };
+    const color = statusColors[data.decryptionStatus] || '#858585';
+    html += `<div class="detail-row"><div class="detail-label">Decryption</div><div class="detail-value" style="color:${color}">${data.decryptionStatus}</div></div>`;
+  }
+
+  if (data.hopStart !== undefined) {
+    html += `<div class="detail-row"><div class="detail-label">Hops</div><div class="detail-value">${(data.hopStart || 0) - (data.hopLimit || 0)} / ${data.hopStart || 0}</div></div>`;
+  }
+
+  if (data.viaMqtt !== undefined) {
+    html += `<div class="detail-row"><div class="detail-label">Via MQTT</div><div class="detail-value">${data.viaMqtt ? 'Yes' : 'No'}</div></div>`;
+  }
+
+  // Text content
+  if (data.text && data.portName === 'TEXT_MESSAGE') {
+    html += `<div class="detail-row"><div class="detail-label">Text</div><div class="detail-value" style="color:#e5e5e5">${escapeHtml(data.text)}</div></div>`;
+  }
+
+  // Decoded payload as JSON
+  if (data.payload && typeof data.payload === 'object') {
+    html += `<div class="detail-row"><div class="detail-label">Decoded Payload</div><div class="detail-json">${escapeHtml(JSON.stringify(data.payload, null, 2))}</div></div>`;
+  }
+
+  content.innerHTML = html;
+}
+
+function closeDetailPanel() {
+  const panel = $('#detail-panel');
+  if (panel) panel.classList.add('hidden');
+  state.selectedMessage = null;
+  const log = $('#activity-log');
+  if (log) log.querySelectorAll('.selected').forEach(el => el.classList.remove('selected'));
+}
+
+// =============== Port Config ===============
+
 function getPortConfig(portName, payload, text) {
   const config = PORT_CONFIGS[portName] || DEFAULT_PORT_CONFIG;
   const context = { payload, text, portName };
-  return {
-    ...config,
-    content: typeof config.content === 'function' ? config.content(context) : config.content,
-  };
+  return { ...config, content: typeof config.content === 'function' ? config.content(context) : config.content };
 }
 
 function formatNodeIdShort(num) {
@@ -634,7 +806,6 @@ function getHwModelName(hwModel) {
   return HW_MODEL_NAMES[hwModel] || `HW_${hwModel}`;
 }
 
-// Format uptime
 function formatUptime(seconds) {
   if (seconds < 60) return `${seconds}s`;
   if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
@@ -644,141 +815,82 @@ function formatUptime(seconds) {
 
 function escapeHtml(str) {
   if (!str) return '';
-  return str.replace(/[&<>"']/g, (c) => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
-  }[c]));
+  return str.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
-// Generate output preview
-function generate() {
-  const isJsonMode = state.path === '2/json';
+// =============== Actions ===============
 
-  const topic = buildTopicFromComponents({
-    root: state.mqttRoot,
-    region: state.region,
-    path: state.path,
-    channel: state.channel,
-    gatewayId: state.gatewayId,
+function sendMessage() {
+  if (!wsClient?.isConnected) { showToast('Not connected to MQTT broker'); return; }
+
+  const s = state.send;
+  const sent = wsClient.publish({
+    root: s.root, region: s.region, path: s.path, channel: s.channel,
+    gatewayId: s.gatewayId, from: s.senderId, to: s.receiverId,
+    text: s.message, key: s.path === '2/json' ? undefined : s.key,
   });
 
-  let preview;
-  if (isJsonMode) {
-    // JSON mode preview
-    preview = {
-      from: parseNodeId(state.senderId),
-      to: parseNodeId(state.receiverId),
-      type: 'sendtext',
-      payload: state.message,
-    };
-  } else {
-    // Protobuf mode preview
-    preview = {
-      serviceEnvelope: {
-        packet: {
-          from: state.senderId,
-          to: state.receiverId,
-          channel: 0,
-          hopLimit: 0,
-          viaMqtt: true,
-          encrypted: '<AES256-CTR encrypted Data>',
-        },
-        channelId: state.channel,
-        gatewayId: state.gatewayId,
-      },
-      dataPayload: {
-        portnum: 1,
-        payload: state.message,
-      },
-    };
-  }
-
-  // Update outputs
-  $('#out-topic').textContent = topic;
-  $('#out-payload').textContent = JSON.stringify(preview, null, 2);
-
-  // Update payload label
-  const payloadLabel = $('#payload-label');
-  if (payloadLabel) {
-    payloadLabel.textContent = isJsonMode ? 'Payload (JSON - unencrypted)' : 'Payload (before encryption)';
-  }
-
-  // Update debug info
-  const debugChannel = $('#debug-channel');
-  if (debugChannel) {
-    debugChannel.textContent = state.channel;
-  }
-
-  // Update ID previews
-  const senderInt = $('#sender-int');
-  const receiverInt = $('#receiver-int');
-  if (senderInt) senderInt.textContent = `Int: ${parseNodeId(state.senderId)}`;
-  if (receiverInt) receiverInt.textContent = `Int: ${parseNodeId(state.receiverId)}`;
-
-  return { topic };
+  if (!sent) showToast('Failed to send - WebSocket not ready');
 }
 
-// Sync state from inputs
-function syncState() {
-  // Topic structure
-  state.mqttRoot = $('#mqtt-root')?.value || 'msh';
-  state.region = $('#region')?.value || 'EU_868';
-  state.path = $('#path-select')?.value || '2/e';
-  state.gatewayId = $('#gateway-id').value;
+function subscribeFromInputs() {
+  if (!wsClient?.isConnected) { showToast('Not connected to MQTT broker'); return; }
 
-  // Sender
-  const autoCheckbox = $('#sender-auto');
-  state.senderAuto = autoCheckbox?.checked ?? true;
-  if (state.senderAuto) {
-    state.senderId = state.gatewayId;
-  } else {
-    state.senderId = $('#sender-id')?.value || state.gatewayId;
-  }
-
-  // Message content
-  state.receiverId = $('#receiver-id').value;
-  state.message = $('#message-text').value;
-  state.key = $('#encryption-key')?.value || 'AQ==';
-
-  // Channel
-  const channelSelect = $('#channel-select');
-  if (channelSelect.value === 'custom') {
-    state.channel = $('#channel-custom').value || 'LongFast';
-    $('#channel-custom').classList.remove('hidden');
-  } else {
-    state.channel = channelSelect.value;
-    $('#channel-custom').classList.add('hidden');
-  }
-
-  generate();
+  const topic = buildTopicFromComponents({
+    root: state.watch.root, region: state.watch.region,
+    path: state.watch.path, channel: state.watch.channel, gatewayId: '#',
+  });
+  wsClient.subscribe(topic);
 }
 
-// Send message via WebSocket -> Server -> MQTT
-function sendMessage() {
-  if (!wsClient?.isConnected) {
-    showToast('Not connected to MQTT broker');
+function unsubscribeFromTopic(topic) {
+  if (!wsClient?.isConnected) { showToast('Not connected to MQTT broker'); return; }
+  wsClient.unsubscribe(topic);
+}
+
+function toggleSubscriptionVisibility(topic) {
+  state.subscriptionVisibility[topic] = !state.subscriptionVisibility[topic];
+  renderSubscriptions();
+  applyFilter();
+}
+
+function renderSubscriptions() {
+  const container = $('#subscription-list');
+  if (!container) return;
+
+  if (state.subscriptions.length === 0) {
+    container.innerHTML = '<span class="sidebar-empty">No active subscriptions</span>';
     return;
   }
 
-  const isJsonMode = state.path === '2/json';
+  container.innerHTML = state.subscriptions.map(topic => {
+    const parts = topic.split('/');
+    const shortLabel = parts.length >= 5 ? `${parts[1]}/${parts.slice(2, -1).join('/')}` : topic;
+    const isVisible = state.subscriptionVisibility[topic] !== false;
+    const eyeIcon = isVisible ? 'fa-eye' : 'fa-eye-slash';
+    const eyeClass = isVisible ? 'sub-eye-btn visible' : 'sub-eye-btn';
 
-  const sent = wsClient.publish({
-    root: state.mqttRoot,
-    region: state.region,
-    path: state.path,
-    channel: state.channel,
-    gatewayId: state.gatewayId,
-    from: state.senderId,
-    to: state.receiverId,
-    text: state.message,
-    key: isJsonMode ? undefined : state.key, // No key in JSON mode
+    return `
+      <div class="sub-item" title="${escapeHtml(topic)}">
+        <span class="sub-item-label">${escapeHtml(shortLabel)}</span>
+        <button class="${eyeClass}" data-eye-topic="${escapeHtml(topic)}" title="${isVisible ? 'Hide messages' : 'Show messages'}">
+          <i class="fas ${eyeIcon}"></i>
+        </button>
+        <button class="sub-unsub-btn" data-unsub-topic="${escapeHtml(topic)}" title="Unsubscribe">&times;</button>
+      </div>
+    `;
+  }).join('');
+
+  container.querySelectorAll('[data-eye-topic]').forEach(btn => {
+    btn.addEventListener('click', e => { e.stopPropagation(); toggleSubscriptionVisibility(btn.dataset.eyeTopic); });
   });
-
-  if (!sent) {
-    showToast('Failed to send - WebSocket not ready');
-  }
+  container.querySelectorAll('[data-unsub-topic]').forEach(btn => {
+    btn.addEventListener('click', e => { e.stopPropagation(); unsubscribeFromTopic(btn.dataset.unsubTopic); });
+  });
 }
 
-// Start app
+// =============== Boot ===============
+
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', init);
 } else {

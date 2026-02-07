@@ -43,6 +43,7 @@ export function createHttpServer() {
         rootTopic: config.meshtastic.rootTopic,
         defaultChannel: config.meshtastic.defaultChannel,
         gatewayId: config.meshtastic.gatewayId,
+        mqttHost: config.mqtt.host,
       }));
       return;
     }
