@@ -2,7 +2,7 @@ import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { join, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { config } from './config.js';
+import { config, buildCatalogSeed } from './config.js';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const PUBLIC_DIR = join(__dirname, '../public');
@@ -30,21 +30,19 @@ async function serveFile(res, filePath) {
 
 export function createHttpServer() {
   return createServer(async (req, res) => {
-    // API endpoint for config (non-sensitive)
     if (req.url === '/api/config') {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({
         wsPort: config.wsPort,
-        // Decomposed topic components
         mqttRoot: config.meshtastic.mqttRoot,
         region: config.meshtastic.region,
         defaultPath: config.meshtastic.defaultPath,
-        // Backward-compatible
         rootTopic: config.meshtastic.rootTopic,
         defaultChannel: config.meshtastic.defaultChannel,
         defaultKey: config.meshtastic.defaultKey,
         gatewayId: config.meshtastic.gatewayId,
         mqttHost: config.mqtt.host,
+        catalogSeed: buildCatalogSeed(),
       }));
       return;
     }
@@ -52,7 +50,6 @@ export function createHttpServer() {
     const url = req.url === '/' ? '/index.html' : req.url;
     const filePath = join(PUBLIC_DIR, url);
 
-    // Prevent directory traversal
     if (!filePath.startsWith(PUBLIC_DIR)) {
       res.writeHead(403);
       res.end('Forbidden');

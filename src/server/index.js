@@ -798,14 +798,17 @@ async function publishProtobufMessage(ws, { root, region, path, channel, gateway
   const fromNode = parseNodeId(from || gatewayId);
   const toNode = parseNodeId(to);
   const packetId = generatePacketId();
-  const effectiveKey = key || config.meshtastic.defaultKey;
-  rememberChannelKey(channel, effectiveKey);
+  // key: undefined/null = not specified (use default), '' = no encryption
+  const effectiveKey = key === '' ? null : (key || config.meshtastic.defaultKey);
+  if (effectiveKey) {
+    rememberChannelKey(channel, effectiveKey);
+  }
 
   // Build topic: msh/EU_868/2/e/LongFast/!gateway
   const topic = buildTopic({ root, region, path, channel, gatewayId });
 
   // Compute channel hash (XOR of channel name and key bytes)
-  const channelHash = generateChannelHash(channel, effectiveKey);
+  const channelHash = generateChannelHash(channel, effectiveKey || '');
 
   // Create Data message (portnum 1 = TEXT_MESSAGE_APP)
   const dataMessage = encodeData({
@@ -814,13 +817,10 @@ async function publishProtobufMessage(ws, { root, region, path, channel, gateway
     bitfield: 1, // Indicates sender capabilities
   });
 
-  // Encrypt the Data message
-  const encryptedData = encrypt(
-    dataMessage,
-    effectiveKey,
-    packetId,
-    fromNode
-  );
+  // Encrypt the Data message (or pass plaintext if no key)
+  const encryptedData = effectiveKey
+    ? encrypt(dataMessage, effectiveKey, packetId, fromNode)
+    : dataMessage;
 
   // Create ServiceEnvelope with MeshPacket
   const envelope = encodeServiceEnvelope({

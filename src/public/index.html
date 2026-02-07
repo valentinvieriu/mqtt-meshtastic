@@ -32,6 +32,15 @@
       <button class="activity-bar-btn" data-view="send" title="Send Message">
         <i class="fas fa-paper-plane"></i>
       </button>
+      <button class="activity-bar-btn" data-view="channels" title="Channels">
+        <i class="fas fa-hashtag"></i>
+      </button>
+      <button class="activity-bar-btn" data-view="nodes" title="Nodes">
+        <i class="fas fa-microchip"></i>
+      </button>
+      <button class="activity-bar-btn" data-view="manage" title="Settings" style="margin-top:auto;margin-bottom:4px">
+        <i class="fas fa-cog"></i>
+      </button>
     </div>
 
     <!-- Sidebar -->
@@ -41,83 +50,54 @@
       <div class="sidebar-view active" id="sidebar-watch">
         <div class="sidebar-header">WATCH</div>
 
-        <!-- Topic Section -->
+        <!-- Channel Section -->
         <div class="sidebar-section">
-          <button class="sidebar-section-header" data-collapse="watch-topic-body">
+          <button class="sidebar-section-header" data-collapse="watch-channel-body">
             <i class="fas fa-chevron-down sidebar-chevron"></i>
-            <span>TOPIC</span>
+            <span>CHANNEL</span>
             <span id="watch-mode-indicator" class="mode-badge mode-badge-proto">Protobuf</span>
           </button>
-          <div class="sidebar-section-body" id="watch-topic-body">
-            <div class="sidebar-field-row">
-              <div class="sidebar-field">
-                <label>Root</label>
-                <input type="text" id="watch-root" value="msh" class="watch-input sidebar-input">
-              </div>
-              <div class="sidebar-field">
-                <label>Region</label>
-                <input type="text" id="watch-region" value="EU_868" class="watch-input sidebar-input">
-              </div>
-            </div>
-
+          <div class="sidebar-section-body" id="watch-channel-body">
             <div class="sidebar-field">
-              <label>Path (Mode)</label>
+              <label>Network</label>
               <div class="sidebar-select-wrap">
-                <select id="watch-path-select" class="watch-input sidebar-input sidebar-select">
-                  <option value="2/e">2/e (Protobuf - Encrypted)</option>
-                  <option value="2/json">2/json (JSON - Unencrypted)</option>
+                <select id="watch-network-select" class="watch-input sidebar-input sidebar-select">
                 </select>
                 <i class="fas fa-chevron-down sidebar-select-icon"></i>
               </div>
             </div>
 
             <div class="sidebar-field">
-              <label class="sidebar-label-with-actions">
-                <span>Channel</span>
-                <span class="field-actions">
-                  <button type="button" id="watch-channel-default-btn" class="field-action-btn" title="Reset to default channel">Default</button>
-                </span>
-              </label>
+              <label>Channel</label>
               <div class="sidebar-select-wrap">
                 <select id="watch-channel-select" class="watch-input sidebar-input sidebar-select">
-                  <option value="LongFast">LongFast</option>
-                  <option value="LongSlow">LongSlow</option>
-                  <option value="MediumFast">MediumFast</option>
-                  <option value="MediumSlow">MediumSlow</option>
-                  <option value="ShortFast">ShortFast</option>
-                  <option value="ShortSlow">ShortSlow</option>
-                  <option value="VeryLongSlow">VeryLongSlow</option>
-                  <option value="mqtt">mqtt</option>
-                  <option value="custom">Custom...</option>
                 </select>
                 <i class="fas fa-chevron-down sidebar-select-icon"></i>
               </div>
-              <input type="text" id="watch-channel-custom" placeholder="Custom channel" class="watch-input sidebar-input hidden" style="margin-top:4px">
+            </div>
+
+            <div class="sidebar-field-row">
+              <div class="sidebar-field">
+                <label>Region</label>
+                <div class="sidebar-select-wrap">
+                  <select id="watch-region-select" class="watch-input sidebar-input sidebar-select">
+                  </select>
+                  <i class="fas fa-chevron-down sidebar-select-icon"></i>
+                </div>
+              </div>
+              <div class="sidebar-field">
+                <label>Path</label>
+                <div class="sidebar-select-wrap">
+                  <select id="watch-path-select" class="watch-input sidebar-input sidebar-select">
+                  </select>
+                  <i class="fas fa-chevron-down sidebar-select-icon"></i>
+                </div>
+              </div>
             </div>
 
             <button id="subscribe-btn" class="sidebar-btn sidebar-btn-primary">
               <i class="fas fa-plus"></i> Subscribe
             </button>
-          </div>
-        </div>
-
-        <!-- Decryption Key Section -->
-        <div class="sidebar-section">
-          <button class="sidebar-section-header collapsed" data-collapse="watch-key-body">
-            <i class="fas fa-chevron-down sidebar-chevron"></i>
-            <span>DECRYPTION KEY</span>
-          </button>
-          <div class="sidebar-section-body collapsed-body" id="watch-key-body">
-            <div class="sidebar-field">
-              <label class="sidebar-label-with-actions">
-                <span>Key</span>
-                <span class="field-actions">
-                  <button type="button" id="watch-key-default-btn" class="field-action-btn" title="Reset to default key">AQ==</button>
-                </span>
-              </label>
-              <input type="text" id="watch-key" value="AQ==" class="watch-input sidebar-input font-mono">
-              <div class="sidebar-hint">Key for decrypting messages on this channel</div>
-            </div>
           </div>
         </div>
 
@@ -139,67 +119,12 @@
       <div class="sidebar-view" id="sidebar-send">
         <div class="sidebar-header">SEND</div>
 
-        <!-- Topic Section -->
-        <div class="sidebar-section">
-          <button class="sidebar-section-header" data-collapse="send-topic-body">
-            <i class="fas fa-chevron-down sidebar-chevron"></i>
-            <span>TOPIC</span>
-            <span id="send-mode-indicator" class="mode-badge mode-badge-proto">Protobuf</span>
-          </button>
-          <div class="sidebar-section-body" id="send-topic-body">
-            <div class="sidebar-field-row">
-              <div class="sidebar-field">
-                <label>Root</label>
-                <input type="text" id="send-root" value="msh" class="send-input sidebar-input">
-              </div>
-              <div class="sidebar-field">
-                <label>Region</label>
-                <input type="text" id="send-region" value="EU_868" class="send-input sidebar-input">
-              </div>
-            </div>
-
-            <div class="sidebar-field">
-              <label>Path (Mode)</label>
-              <div class="sidebar-select-wrap">
-                <select id="send-path-select" class="send-input sidebar-input sidebar-select">
-                  <option value="2/e">2/e (Protobuf - Encrypted)</option>
-                  <option value="2/json">2/json (JSON - Unencrypted)</option>
-                </select>
-                <i class="fas fa-chevron-down sidebar-select-icon"></i>
-              </div>
-            </div>
-
-            <div class="sidebar-field">
-              <label class="sidebar-label-with-actions">
-                <span>Channel</span>
-                <span class="field-actions">
-                  <button type="button" id="send-channel-default-btn" class="field-action-btn" title="Reset to default channel">Default</button>
-                </span>
-              </label>
-              <div class="sidebar-select-wrap">
-                <select id="send-channel-select" class="send-input sidebar-input sidebar-select">
-                  <option value="LongFast">LongFast</option>
-                  <option value="LongSlow">LongSlow</option>
-                  <option value="MediumFast">MediumFast</option>
-                  <option value="MediumSlow">MediumSlow</option>
-                  <option value="ShortFast">ShortFast</option>
-                  <option value="ShortSlow">ShortSlow</option>
-                  <option value="VeryLongSlow">VeryLongSlow</option>
-                  <option value="mqtt">mqtt</option>
-                  <option value="custom">Custom...</option>
-                </select>
-                <i class="fas fa-chevron-down sidebar-select-icon"></i>
-              </div>
-              <input type="text" id="send-channel-custom" placeholder="Custom channel" class="send-input sidebar-input hidden" style="margin-top:4px">
-            </div>
-          </div>
-        </div>
-
         <!-- Message Section -->
         <div class="sidebar-section">
           <button class="sidebar-section-header" data-collapse="send-message-body">
             <i class="fas fa-chevron-down sidebar-chevron"></i>
             <span>MESSAGE</span>
+            <span id="send-mode-indicator" class="mode-badge mode-badge-proto">Protobuf</span>
           </button>
           <div class="sidebar-section-body" id="send-message-body">
 
@@ -215,13 +140,50 @@
             </div>
 
             <div class="sidebar-field">
-              <label class="sidebar-label-with-actions">
-                <span>Gateway ID</span>
-                <span class="field-actions">
-                  <button type="button" id="gateway-default-btn" class="field-action-btn" title="Reset gateway to default">Default</button>
-                </span>
-              </label>
-              <input type="text" id="gateway-id" value="!d844b556" class="send-input sidebar-input font-mono">
+              <label>Network</label>
+              <div class="sidebar-select-wrap">
+                <select id="send-network-select" class="send-input sidebar-input sidebar-select">
+                </select>
+                <i class="fas fa-chevron-down sidebar-select-icon"></i>
+              </div>
+            </div>
+
+            <div class="sidebar-field">
+              <label>Channel</label>
+              <div class="sidebar-select-wrap">
+                <select id="send-channel-select" class="send-input sidebar-input sidebar-select">
+                </select>
+                <i class="fas fa-chevron-down sidebar-select-icon"></i>
+              </div>
+            </div>
+
+            <div class="sidebar-field-row">
+              <div class="sidebar-field">
+                <label>Region</label>
+                <div class="sidebar-select-wrap">
+                  <select id="send-region-select" class="send-input sidebar-input sidebar-select">
+                  </select>
+                  <i class="fas fa-chevron-down sidebar-select-icon"></i>
+                </div>
+              </div>
+              <div class="sidebar-field">
+                <label>Path</label>
+                <div class="sidebar-select-wrap">
+                  <select id="send-path-select" class="send-input sidebar-input sidebar-select">
+                  </select>
+                  <i class="fas fa-chevron-down sidebar-select-icon"></i>
+                </div>
+              </div>
+            </div>
+
+            <div class="sidebar-field">
+              <label>Gateway</label>
+              <div class="sidebar-select-wrap">
+                <select id="send-gateway-select" class="send-input sidebar-input sidebar-select">
+                  <!-- Populated from catalog -->
+                </select>
+                <i class="fas fa-chevron-down sidebar-select-icon"></i>
+              </div>
             </div>
 
             <div class="sidebar-field-row">
@@ -233,17 +195,20 @@
                     <span>Auto</span>
                   </label>
                 </label>
-                <input type="text" id="sender-id" value="!d844b556" class="send-input sidebar-input font-mono disabled-input" disabled>
-                <div class="sidebar-hint font-mono" id="sender-int">Int: -</div>
+                <div class="sidebar-select-wrap">
+                  <select id="send-from-select" class="send-input sidebar-input sidebar-select" disabled>
+                    <!-- Populated from catalog -->
+                  </select>
+                  <i class="fas fa-chevron-down sidebar-select-icon"></i>
+                </div>
               </div>
               <div class="sidebar-field">
                 <label>Receiver</label>
-                <input type="text" id="receiver-id" value="^all" placeholder="!hex or ^all" class="send-input sidebar-input font-mono">
-                <div class="sidebar-hint font-mono" id="receiver-int">Int: -</div>
-                <div class="sidebar-presets">
-                  <button type="button" id="receiver-broadcast-btn" class="preset-btn">^all</button>
-                  <button type="button" id="receiver-gateway-btn" class="preset-btn">Gateway</button>
-                  <button type="button" id="receiver-default-btn" class="preset-btn">Default</button>
+                <div class="sidebar-select-wrap">
+                  <select id="send-to-select" class="send-input sidebar-input sidebar-select">
+                    <!-- Populated from catalog -->
+                  </select>
+                  <i class="fas fa-chevron-down sidebar-select-icon"></i>
                 </div>
               </div>
             </div>
@@ -253,24 +218,58 @@
               <textarea id="message-text" rows="3" class="send-input sidebar-input sidebar-textarea">Hello from web!</textarea>
             </div>
 
-            <div class="sidebar-field" id="key-group">
-              <label class="sidebar-label-with-actions">
-                <span>Encryption Key</span>
-                <span class="field-actions">
-                  <button type="button" id="key-default-btn" class="field-action-btn" title="Reset key to default">Default</button>
-                </span>
-              </label>
-              <input type="text" id="encryption-key" value="AQ==" class="send-input sidebar-input font-mono">
-              <div class="sidebar-hint" id="encryption-key-hint">Default key from server config</div>
-              <div class="sidebar-presets">
-                <button type="button" id="key-short-btn" class="preset-btn" title="Meshtastic Default">AQ==</button>
-                <button type="button" id="key-gen-128-btn" class="preset-btn" title="Generate random AES-128 key"><i class="fas fa-dice"></i> AES-128</button>
-                <button type="button" id="key-gen-256-btn" class="preset-btn" title="Generate random AES-256 key"><i class="fas fa-dice"></i> AES-256</button>
-              </div>
-            </div>
-
             <button id="send-btn" class="sidebar-btn sidebar-btn-send">
               <i class="fas fa-paper-plane"></i> Send Message
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== Channels Sidebar ===== -->
+      <div class="sidebar-view" id="sidebar-channels">
+        <div class="sidebar-header">CHANNELS</div>
+        <div class="manage-tab-content">
+          <div id="channels-channels-list" class="entity-list"></div>
+          <button class="entity-add-btn" id="channels-add-btn">
+            <i class="fas fa-plus"></i> Add Channel
+          </button>
+        </div>
+      </div>
+
+      <!-- ===== Nodes Sidebar ===== -->
+      <div class="sidebar-view" id="sidebar-nodes">
+        <div class="sidebar-header">NODES</div>
+        <div class="manage-tab-content">
+          <div id="nodes-nodes-list" class="entity-list"></div>
+          <button class="entity-add-btn" id="nodes-add-btn">
+            <i class="fas fa-plus"></i> Add Node
+          </button>
+        </div>
+      </div>
+
+      <!-- ===== Settings Sidebar (formerly Manage) ===== -->
+      <div class="sidebar-view" id="sidebar-manage">
+        <div class="sidebar-header">SETTINGS</div>
+
+        <!-- Tab Bar -->
+        <div class="manage-tabs">
+          <button class="manage-tab active" data-manage-tab="networks">Networks</button>
+          <button class="manage-tab" data-manage-tab="keys">Keys</button>
+        </div>
+
+        <!-- Tab Panels -->
+        <div class="manage-tab-content">
+          <div class="manage-tab-panel active" id="manage-panel-networks">
+            <div id="manage-networks-list" class="entity-list"></div>
+            <button class="entity-add-btn" data-entity-add="network">
+              <i class="fas fa-plus"></i> Add Network
+            </button>
+          </div>
+
+          <div class="manage-tab-panel" id="manage-panel-keys">
+            <div id="manage-keys-list" class="entity-list"></div>
+            <button class="entity-add-btn" data-entity-add="key">
+              <i class="fas fa-plus"></i> Add Key
             </button>
           </div>
         </div>
@@ -354,6 +353,57 @@
             </div>
             <div class="preview-box preview-box-payload">
               <pre id="out-payload">...</pre>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Channels Main: Channel Editor -->
+      <div class="main-view" id="main-channels">
+        <div class="tab-bar">
+          <div class="tab-bar-tabs">
+            <span class="tab-bar-label"><i class="fas fa-edit"></i> <span id="channels-editor-title">Select a channel to edit</span></span>
+          </div>
+        </div>
+        <div class="manage-editor-area">
+          <div id="channels-editor" class="manage-editor">
+            <div class="manage-placeholder">
+              <i class="fas fa-hashtag"></i>
+              <span>Select a channel from the sidebar to edit, or click "Add" to create a new one.</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Nodes Main: Node Editor -->
+      <div class="main-view" id="main-nodes">
+        <div class="tab-bar">
+          <div class="tab-bar-tabs">
+            <span class="tab-bar-label"><i class="fas fa-edit"></i> <span id="nodes-editor-title">Select a node to edit</span></span>
+          </div>
+        </div>
+        <div class="manage-editor-area">
+          <div id="nodes-editor" class="manage-editor">
+            <div class="manage-placeholder">
+              <i class="fas fa-microchip"></i>
+              <span>Select a node from the sidebar to edit, or click "Add" to create a new one.</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Settings Main: Entity Editor (Networks + Keys) -->
+      <div class="main-view" id="main-manage">
+        <div class="tab-bar">
+          <div class="tab-bar-tabs">
+            <span class="tab-bar-label"><i class="fas fa-edit"></i> <span id="manage-editor-title">Select an entity to edit</span></span>
+          </div>
+        </div>
+        <div class="manage-editor-area">
+          <div id="manage-editor" class="manage-editor">
+            <div class="manage-placeholder">
+              <i class="fas fa-database"></i>
+              <span>Select an entity from the sidebar to edit, or click "Add" to create a new one.</span>
             </div>
           </div>
         </div>

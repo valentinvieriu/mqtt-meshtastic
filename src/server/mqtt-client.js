@@ -1,7 +1,7 @@
 import mqtt from 'mqtt';
 import { config } from './config.js';
 
-export function createMqttClient(handlers = {}) {
+export function createMqttClient({ autoSubscribeDefault = true, ...handlers } = {}) {
   const { host, port, username, password } = config.mqtt;
   const url = `mqtt://${host}:${port}`;
 
@@ -17,13 +17,18 @@ export function createMqttClient(handlers = {}) {
     reconnectPeriod: 5000,
   });
 
+  let seededDefault = false;
+
   client.on('connect', () => {
     console.log('[MQTT] Connected to broker');
     handlers.onConnect?.();
 
-    // Seed default topic on first connect
-    const defaultTopic = `${config.meshtastic.rootTopic}/${config.meshtastic.defaultChannel}/#`;
-    activeSubscriptions.add(defaultTopic);
+    // Seed default topic on first connect (disable via autoSubscribeDefault: false)
+    if (!seededDefault && autoSubscribeDefault) {
+      const defaultTopic = `${config.meshtastic.rootTopic}/${config.meshtastic.defaultChannel}/#`;
+      activeSubscriptions.add(defaultTopic);
+      seededDefault = true;
+    }
 
     // Re-subscribe all tracked topics (handles reconnects)
     for (const topic of activeSubscriptions) {
