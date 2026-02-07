@@ -1417,9 +1417,42 @@ function getEntityByType(type, id) {
   return catalog[getters[type]]?.(id) || null;
 }
 
+function syncTagField(form, fieldName) {
+  const list = form.querySelector(`.tag-list[data-tag-list="${fieldName}"]`);
+  if (!list) return;
+  const tags = [...list.querySelectorAll('.tag-item')];
+  const values = tags.map(t => t.dataset.tagValue);
+  const defaultTag = list.querySelector('.tag-item-default');
+  const defaultValue = defaultTag?.dataset.tagValue || values[0] || '';
+  const hiddenName = fieldName;
+  const defaultHiddenName = `default${fieldName.charAt(0).toUpperCase() + fieldName.slice(1)}`;
+  const hiddenValue = form.querySelector(`input[name="${hiddenName}"]`);
+  const hiddenDefault = form.querySelector(`input[name="${defaultHiddenName}"]`);
+  if (hiddenValue) hiddenValue.value = values.join(',');
+  if (hiddenDefault) hiddenDefault.value = defaultValue;
+}
+
+function renderTagListField(label, items, defaultValue, fieldName) {
+  const hideDelete = items.length <= 1;
+  const tags = items.map(v => {
+    const isDefault = v === defaultValue;
+    return `<span class="tag-item${isDefault ? ' tag-item-default' : ''}" data-tag-value="${escapeHtml(v)}" data-tag-field="${fieldName}"><span class="tag-default-star">&#9733;</span>${escapeHtml(v)}<button type="button" class="tag-delete${hideDelete ? ' tag-delete-hidden' : ''}" title="Remove">&times;</button></span>`;
+  }).join('');
+  return `
+    <div class="manage-form-field">
+      <label>${escapeHtml(label)}</label>
+      <div class="tag-list" data-tag-list="${fieldName}">${tags}</div>
+      <div class="tag-add-row">
+        <input type="text" class="tag-add-input" data-tag-add-field="${fieldName}" placeholder="Add ${label.toLowerCase().replace(/s$/, '')}...">
+        <button type="button" class="tag-add-btn" data-tag-add-btn="${fieldName}">Add</button>
+      </div>
+      <input type="hidden" name="${fieldName}" value="${escapeHtml(items.join(','))}">
+      <input type="hidden" name="default${fieldName.charAt(0).toUpperCase() + fieldName.slice(1)}" value="${escapeHtml(defaultValue)}">
+    </div>
+  `;
+}
+
 function renderNetworkEditor(entity) {
-  const regionsStr = entity?.regions ? entity.regions.join(', ') : 'EU_868';
-  const pathsStr = entity?.paths ? entity.paths.join(', ') : '2/e, 2/json';
   const regions = entity?.regions || ['EU_868'];
   const paths = entity?.paths || ['2/e', '2/json'];
   const defaultRegion = entity?.defaultRegion || regions[0];
@@ -1433,18 +1466,8 @@ function renderNetworkEditor(entity) {
         <div class="manage-form-field"><label>MQTT Port</label><input type="number" name="mqttPort" value="${entity?.mqttPort || 1883}" class="sidebar-input" required></div>
         <div class="manage-form-field"><label>Root</label><input type="text" name="mqttRoot" value="${escapeHtml(entity?.mqttRoot || 'msh')}" class="sidebar-input" required></div>
       </div>
-      <div class="manage-form-field"><label>Regions (comma-separated)</label><input type="text" name="regionsInput" id="net-regions-input" value="${escapeHtml(regionsStr)}" class="sidebar-input" required></div>
-      <div class="manage-form-field"><label>Default Region</label>
-        <div class="sidebar-select-wrap"><select name="defaultRegion" id="net-default-region" class="sidebar-input sidebar-select">
-          ${regions.map(r => `<option value="${escapeHtml(r)}" ${r === defaultRegion ? 'selected' : ''}>${escapeHtml(r)}</option>`).join('')}
-        </select><i class="fas fa-chevron-down sidebar-select-icon"></i></div>
-      </div>
-      <div class="manage-form-field"><label>Paths (comma-separated)</label><input type="text" name="pathsInput" id="net-paths-input" value="${escapeHtml(pathsStr)}" class="sidebar-input" required></div>
-      <div class="manage-form-field"><label>Default Path</label>
-        <div class="sidebar-select-wrap"><select name="defaultPath" id="net-default-path" class="sidebar-input sidebar-select">
-          ${paths.map(p => `<option value="${escapeHtml(p)}" ${p === defaultPath ? 'selected' : ''}>${escapeHtml(p)}</option>`).join('')}
-        </select><i class="fas fa-chevron-down sidebar-select-icon"></i></div>
-      </div>
+      ${renderTagListField('Regions', regions, defaultRegion, 'regions')}
+      ${renderTagListField('Paths', paths, defaultPath, 'paths')}
       <button type="submit" class="sidebar-btn sidebar-btn-primary">Save</button>
     </form>
   `;
@@ -1547,29 +1570,78 @@ function setupEditorEvents(type, entity, { stateRef, renderList, renderEditor, c
     }
   });
 
-  // Network regions input -> update default region select
-  root.querySelector('#net-regions-input')?.addEventListener('input', () => {
-    const input = form.querySelector('[name="regionsInput"]');
-    const select = form.querySelector('[name="defaultRegion"]');
-    if (!input || !select) return;
-    const prev = select.value;
-    const regions = input.value.split(',').map(s => s.trim()).filter(Boolean);
-    select.innerHTML = regions.map(r => `<option value="${escapeHtml(r)}">${escapeHtml(r)}</option>`).join('');
-    if (regions.includes(prev)) select.value = prev;
-    else if (regions.length > 0) select.value = regions[0];
-  });
+  // Tag list interactions (regions, paths)
+  if (type === 'network') {
+    // Click tag -> set as default
+    form.addEventListener('click', (e) => {
+      const tagItem = e.target.closest('.tag-item');
+      if (!tagItem || e.target.closest('.tag-delete')) return;
+      const fieldName = tagItem.dataset.tagField;
+      const list = form.querySelector(`.tag-list[data-tag-list="${fieldName}"]`);
+      if (!list) return;
+      list.querySelectorAll('.tag-item').forEach(t => t.classList.remove('tag-item-default'));
+      tagItem.classList.add('tag-item-default');
+      syncTagField(form, fieldName);
+    });
 
-  // Network paths input -> update default path select
-  root.querySelector('#net-paths-input')?.addEventListener('input', () => {
-    const input = form.querySelector('[name="pathsInput"]');
-    const select = form.querySelector('[name="defaultPath"]');
-    if (!input || !select) return;
-    const prev = select.value;
-    const paths = input.value.split(',').map(s => s.trim()).filter(Boolean);
-    select.innerHTML = paths.map(p => `<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join('');
-    if (paths.includes(prev)) select.value = prev;
-    else if (paths.length > 0) select.value = paths[0];
-  });
+    // Click × -> remove tag
+    form.addEventListener('click', (e) => {
+      const delBtn = e.target.closest('.tag-delete');
+      if (!delBtn) return;
+      const tagItem = delBtn.closest('.tag-item');
+      if (!tagItem) return;
+      const fieldName = tagItem.dataset.tagField;
+      const list = form.querySelector(`.tag-list[data-tag-list="${fieldName}"]`);
+      if (!list) return;
+      const allTags = list.querySelectorAll('.tag-item');
+      if (allTags.length <= 1) return; // block removing last tag
+      const wasDefault = tagItem.classList.contains('tag-item-default');
+      tagItem.remove();
+      if (wasDefault) {
+        const first = list.querySelector('.tag-item');
+        if (first) first.classList.add('tag-item-default');
+      }
+      // Update delete button visibility
+      const remaining = list.querySelectorAll('.tag-item');
+      remaining.forEach(t => {
+        const db = t.querySelector('.tag-delete');
+        if (db) db.classList.toggle('tag-delete-hidden', remaining.length <= 1);
+      });
+      syncTagField(form, fieldName);
+    });
+
+    // Add tag via button or Enter
+    const addTag = (fieldName) => {
+      const input = form.querySelector(`.tag-add-input[data-tag-add-field="${fieldName}"]`);
+      const list = form.querySelector(`.tag-list[data-tag-list="${fieldName}"]`);
+      if (!input || !list) return;
+      const value = input.value.trim();
+      if (!value) return;
+      // Check duplicates
+      const existing = [...list.querySelectorAll('.tag-item')].map(t => t.dataset.tagValue);
+      if (existing.includes(value)) { input.value = ''; return; }
+      // Create new tag
+      const span = document.createElement('span');
+      span.className = 'tag-item';
+      span.dataset.tagValue = value;
+      span.dataset.tagField = fieldName;
+      span.innerHTML = `<span class="tag-default-star">&#9733;</span>${escapeHtml(value)}<button type="button" class="tag-delete" title="Remove">&times;</button>`;
+      list.appendChild(span);
+      input.value = '';
+      // Show all delete buttons now that there's more than one
+      list.querySelectorAll('.tag-item .tag-delete').forEach(db => db.classList.remove('tag-delete-hidden'));
+      syncTagField(form, fieldName);
+    };
+
+    form.querySelectorAll('.tag-add-btn').forEach(btn => {
+      btn.addEventListener('click', () => addTag(btn.dataset.tagAddBtn));
+    });
+    form.querySelectorAll('.tag-add-input').forEach(input => {
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); addTag(input.dataset.tagAddField); }
+      });
+    });
+  }
 
   form.addEventListener('submit', (e) => {
     e.preventDefault();
@@ -1583,13 +1655,11 @@ function setupEditorEvents(type, entity, { stateRef, renderList, renderEditor, c
     }
     if (type === 'network') {
       data.mqttPort = parseInt(data.mqttPort, 10) || 1883;
-      if (data.regionsInput) {
-        data.regions = data.regionsInput.split(',').map(s => s.trim()).filter(Boolean);
-        delete data.regionsInput;
+      if (data.regions) {
+        data.regions = data.regions.split(',').filter(Boolean);
       }
-      if (data.pathsInput) {
-        data.paths = data.pathsInput.split(',').map(s => s.trim()).filter(Boolean);
-        delete data.pathsInput;
+      if (data.paths) {
+        data.paths = data.paths.split(',').filter(Boolean);
       }
       if (data.regions && data.defaultRegion && !data.regions.includes(data.defaultRegion)) {
         data.defaultRegion = data.regions[0] || 'EU_868';

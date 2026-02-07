@@ -362,6 +362,107 @@ body {
   border-color: #4a4a4a;
 }
 
+/* Tag list (regions, paths) */
+.tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.tag-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: #2d2d30;
+  border: 1px solid #3c3c3c;
+  border-radius: 3px;
+  padding: 3px 6px;
+  cursor: pointer;
+  font-size: 11px;
+  font-family: 'Menlo', 'Consolas', monospace;
+  color: #cccccc;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.tag-item:hover {
+  background: #35353a;
+}
+
+.tag-item-default {
+  border-color: #007acc;
+  background: #1a2a3a;
+}
+
+.tag-default-star {
+  font-size: 9px;
+  color: #585858;
+  font-style: normal;
+}
+
+.tag-item-default .tag-default-star {
+  color: #007acc;
+}
+
+.tag-delete {
+  background: none;
+  border: none;
+  color: #585858;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  padding: 0 1px;
+  transition: color 0.15s;
+}
+
+.tag-delete:hover {
+  color: #f44747;
+}
+
+.tag-delete.tag-delete-hidden {
+  display: none;
+}
+
+.tag-add-row {
+  display: flex;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.tag-add-input {
+  flex: 1;
+  background: #3c3c3c;
+  border: 1px solid #3c3c3c;
+  color: #cccccc;
+  padding: 3px 6px;
+  font-size: 11px;
+  border-radius: 2px;
+  outline: none;
+  font-family: 'Menlo', 'Consolas', monospace;
+  transition: border-color 0.15s;
+}
+
+.tag-add-input:focus {
+  border-color: #007acc;
+}
+
+.tag-add-btn {
+  background: #2d2d30;
+  border: 1px solid #3c3c3c;
+  color: #9f9f9f;
+  border-radius: 3px;
+  font-size: 10px;
+  line-height: 1;
+  padding: 3px 8px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.tag-add-btn:hover {
+  background: #3a3a3d;
+  color: #d4d4d4;
+  border-color: #4a4a4a;
+}
+
 .auto-toggle {
   display: flex;
   align-items: center;
