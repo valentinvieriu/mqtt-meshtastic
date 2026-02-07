@@ -42,6 +42,7 @@ export function createHttpServer() {
         // Backward-compatible
         rootTopic: config.meshtastic.rootTopic,
         defaultChannel: config.meshtastic.defaultChannel,
+        defaultKey: config.meshtastic.defaultKey,
         gatewayId: config.meshtastic.gatewayId,
         mqttHost: config.mqtt.host,
       }));

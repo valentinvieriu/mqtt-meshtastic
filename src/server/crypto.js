@@ -1,12 +1,19 @@
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 
+// Meshtastic firmware's default channel key ("AQ==" shorthand expands to this key).
+// Hex: d4 f1 bb 3a 20 29 07 59 f0 bc ff ab cf 4e 69 01
+const DEFAULT_CHANNEL_KEY_HEX = 'd4f1bb3a20290759f0bcffabcf4e6901';
+const DEFAULT_CHANNEL_KEY = Buffer.from(DEFAULT_CHANNEL_KEY_HEX, 'hex');
+
 /**
  * Generate channel hash from channel name and key
  * Used in MeshPacket.channel field to identify which key to use for decryption
  * Based on: https://github.com/meshtastic/firmware/blob/master/src/mesh/Channels.cpp
  */
 export function generateChannelHash(channelName, keyBase64) {
-  const keyBytes = Buffer.from(keyBase64, 'base64');
+  // Important: hash uses expanded key bytes, so AQ== and 1PG7OiApB1nwvP+rz05pAQ==
+  // produce the same channel hash for a given channel name.
+  const keyBytes = decodeMeshtasticKey(keyBase64);
   const nameBytes = Buffer.from(channelName, 'utf-8');
 
   // XOR all bytes together
@@ -31,27 +38,63 @@ export function generateChannelHash(channelName, keyBase64) {
 //   Bytes 8-11: fromNode (uint32_t little-endian)
 //   Bytes 12-15: zeros
 
+function decodeBase64(input) {
+  const normalized = String(input || '').replace(/\s+/g, '');
+  if (!normalized) return Buffer.alloc(0);
+
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(normalized) || normalized.length % 4 !== 0) {
+    throw new Error('Invalid base64 key format');
+  }
+
+  return Buffer.from(normalized, 'base64');
+}
+
 /**
- * Expand key to the appropriate size
- * Short keys are expanded by repetition
- * Returns { key, algorithm }
+ * Expand Meshtastic PSK shorthand into the AES key bytes used by encryption.
+ * Compatible with firmware channel PSK rules:
+ * - 0 bytes: no crypto
+ * - 1 byte: shorthand (0x00 = no crypto, 0x01..0xFF = default key with last byte set)
+ * - 16 bytes: AES-128 key
+ * - 32 bytes: AES-256 key
+ *
+ * Examples:
+ * - AQ== (0x01) -> default key ending in ...01
+ * - Ag== (0x02) -> same default key but ending in ...02 ("Simple 1")
+ * - 1PG7OiApB1nwvP+rz05pAQ== -> same bytes as AQ== expansion
  */
-function prepareKey(keyBytes) {
-  // Determine target size based on input
-  // Keys <= 16 bytes use AES-128, longer keys use AES-256
-  const targetSize = keyBytes.length > 16 ? 32 : 16;
-  const algorithm = targetSize === 16 ? 'aes-128-ctr' : 'aes-256-ctr';
+function expandMeshtasticPsk(keyBytes) {
+  if (keyBytes.length === 0) return Buffer.alloc(0);
 
-  if (keyBytes.length >= targetSize) {
-    return { key: keyBytes.slice(0, targetSize), algorithm };
+  if (keyBytes.length === 1) {
+    const shorthand = keyBytes[0];
+    if (shorthand === 0x00) return Buffer.alloc(0);
+
+    const expanded = Buffer.from(DEFAULT_CHANNEL_KEY);
+    expanded[expanded.length - 1] = shorthand;
+    return expanded;
   }
 
-  // Expand by repetition
-  const expanded = Buffer.alloc(targetSize);
-  for (let i = 0; i < targetSize; i++) {
-    expanded[i] = keyBytes[i % keyBytes.length];
+  if (keyBytes.length === 16 || keyBytes.length === 32) {
+    return Buffer.from(keyBytes);
   }
-  return { key: expanded, algorithm };
+
+  throw new Error(`Unsupported Meshtastic key length ${keyBytes.length} bytes (expected 0, 1, 16, or 32)`);
+}
+
+export function decodeMeshtasticKey(keyBase64) {
+  return expandMeshtasticPsk(decodeBase64(keyBase64));
+}
+
+function prepareCipherKey(keyBase64) {
+  // Meshtastic uses raw key length to select AES variant.
+  // 16-byte expanded key -> AES-128-CTR, 32-byte key -> AES-256-CTR.
+  const key = decodeMeshtasticKey(keyBase64);
+  if (key.length === 0) {
+    throw new Error('No encryption key configured (PSK 0x00 / empty)');
+  }
+
+  const algorithm = key.length === 16 ? 'aes-128-ctr' : 'aes-256-ctr';
+  return { key, algorithm };
 }
 
 /**
@@ -77,8 +120,7 @@ function buildNonce(packetId, fromNode) {
  * Encrypt a message using Meshtastic's AES-CTR scheme
  */
 export function encrypt(plaintext, keyBase64, packetId, fromNode) {
-  const keyBytes = Buffer.from(keyBase64, 'base64');
-  const { key, algorithm } = prepareKey(keyBytes);
+  const { key, algorithm } = prepareCipherKey(keyBase64);
   const nonce = buildNonce(packetId, fromNode);
 
   const cipher = createCipheriv(algorithm, key, nonce);
@@ -94,8 +136,7 @@ export function encrypt(plaintext, keyBase64, packetId, fromNode) {
  * Decrypt a message using Meshtastic's AES-CTR scheme
  */
 export function decrypt(ciphertext, keyBase64, packetId, fromNode) {
-  const keyBytes = Buffer.from(keyBase64, 'base64');
-  const { key, algorithm } = prepareKey(keyBytes);
+  const { key, algorithm } = prepareCipherKey(keyBase64);
   const nonce = buildNonce(packetId, fromNode);
 
   const decipher = createDecipheriv(algorithm, key, nonce);

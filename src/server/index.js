@@ -59,6 +59,10 @@ const RAW_HEX_PREVIEW_LENGTH = 100;
 const RAW_TEXT_PREVIEW_LENGTH = 140;
 const PRINTABLE_RATIO_THRESHOLD = 0.85;
 const UTF8_REPLACEMENT_RATIO_THRESHOLD = 0.15;
+// Mutable in-memory key cache used for decryption attempts.
+// Starts with config CHANNEL_KEYS/defaults, then learns channel->key pairs from
+// successful outbound publishes during this process lifetime.
+const runtimeChannelKeys = { ...config.meshtastic.channelKeys };
 
 function parseTopicComponents(topic) {
   const parts = topic.split('/').filter(Boolean);
@@ -77,6 +81,13 @@ function parseTopicComponents(topic) {
     channel: parts[protoVersionIndex + 2] || 'unknown',
     gateway: parts[protoVersionIndex + 3] || 'unknown',
   };
+}
+
+function rememberChannelKey(channelName, keyBase64) {
+  const channel = String(channelName || '').trim();
+  const key = String(keyBase64 || '').trim();
+  if (!channel || !key) return;
+  runtimeChannelKeys[channel] = key;
 }
 
 function getTopicPath(topic) {
@@ -501,20 +512,23 @@ function handleMqttMessage(topic, rawMessage) {
         return;
       }
 
+      const topicSuffix = (!channelId || !gatewayId) ? parseTopicSuffix(topic) : null;
+      const resolvedChannelId = channelId || topicSuffix.channel;
+      const resolvedGatewayId = gatewayId || topicSuffix.gateway;
+
       const {
         decodedText,
         portnum,
         decryptionStatus,
         decodedPayload,
-      } = decodePacketContent(packet);
+      } = decodePacketContent(packet, { channelId: resolvedChannelId });
 
       // Broadcast to WebSocket clients
-      const topicSuffix = (!channelId || !gatewayId) ? parseTopicSuffix(topic) : null;
       broadcast({
         type: 'message',
         topic,
-        channelId: channelId || topicSuffix.channel,
-        gatewayId: gatewayId || topicSuffix.gateway,
+        channelId: resolvedChannelId,
+        gatewayId: resolvedGatewayId,
         from: formatNodeId(packet.from),
         to: formatNodeId(packet.to),
         packetId: packet.id,
@@ -539,9 +553,9 @@ function handleMqttMessage(topic, rawMessage) {
   broadcast(buildRawMessage(topic, rawMessage, classification));
 }
 
-function decodePacketContent(packet) {
+function decodePacketContent(packet, context = {}) {
   if (packet.encrypted?.length > 0) {
-    return decodeEncryptedPacket(packet);
+    return decodeEncryptedPacket(packet, context);
   }
 
   if (packet.decoded) {
@@ -556,39 +570,103 @@ function decodePacketContent(packet) {
   };
 }
 
-function decodeEncryptedPacket(packet) {
-  try {
-    const decrypted = decrypt(
-      packet.encrypted,
-      config.meshtastic.defaultKey,
-      packet.id,
-      packet.from
-    );
+function decodeEncryptedPacket(packet, context = {}) {
+  // Decryption can be channel-specific: same broker traffic may carry multiple
+  // channels with different PSKs. Build candidate keys in priority order and
+  // try them until protobuf Data decode succeeds.
+  const attempts = buildDecryptionAttempts(context.channelId, packet.channel);
 
-    const data = decodeData(decrypted);
-    const decodedText = data.portnum === PortNum.TEXT_MESSAGE_APP
-      ? data.payload.toString('utf-8')
-      : null;
+  for (const attempt of attempts) {
+    try {
+      const decrypted = decrypt(
+        packet.encrypted,
+        attempt.keyBase64,
+        packet.id,
+        packet.from
+      );
 
-    if (decodedText) {
-      console.log(`[MQTT] ${formatNodeId(packet.from)} → ${formatNodeId(packet.to)}: "${decodedText}"`);
+      const data = decodeData(decrypted);
+      const decodedText = data.portnum === PortNum.TEXT_MESSAGE_APP
+        ? data.payload.toString('utf-8')
+        : null;
+
+      if (decodedText) {
+        console.log(`[MQTT] ${formatNodeId(packet.from)} → ${formatNodeId(packet.to)}: "${decodedText}"`);
+      }
+
+      return {
+        decodedText,
+        portnum: data.portnum,
+        decryptionStatus: 'success',
+        decodedPayload: decodePayloadByType(data.portnum, data.payload),
+      };
+    } catch {
+      // Try next configured key candidate
     }
-
-    return {
-      decodedText,
-      portnum: data.portnum,
-      decryptionStatus: 'success',
-      decodedPayload: decodePayloadByType(data.portnum, data.payload),
-    };
-  } catch {
-    // Different key or malformed payload.
-    return {
-      decodedText: null,
-      portnum: UNKNOWN_PORTNUM,
-      decryptionStatus: 'failed',
-      decodedPayload: null,
-    };
   }
+
+  // Different key or malformed payload.
+  return {
+    decodedText: null,
+    portnum: UNKNOWN_PORTNUM,
+    decryptionStatus: 'failed',
+    decodedPayload: null,
+  };
+}
+
+function resolveChannelKey(channelName) {
+  if (!channelName) return null;
+  return runtimeChannelKeys[channelName] || null;
+}
+
+function buildDecryptionAttempts(channelName, packetChannelHash) {
+  const attempts = [];
+  const seen = new Set();
+
+  const addAttempt = (candidateChannel, keyBase64) => {
+    const key = String(keyBase64 || '').trim();
+    const channel = String(candidateChannel || '').trim();
+    if (!key || !channel || channel === 'unknown') return;
+
+    const dedupeKey = `${channel}\u0000${key}`;
+    if (seen.has(dedupeKey)) return;
+    seen.add(dedupeKey);
+
+    attempts.push({ channel, keyBase64: key });
+  };
+
+  // First priority: key for the resolved channel name from envelope/topic.
+  if (channelName) {
+    const channelKey = resolveChannelKey(channelName);
+    if (channelKey) addAttempt(channelName, channelKey);
+    if (!channelKey || channelKey !== config.meshtastic.defaultKey) {
+      addAttempt(channelName, config.meshtastic.defaultKey);
+    }
+  }
+
+  // Then: all known channel keys (useful when channel metadata is absent/wrong).
+  for (const [configuredChannel, configuredKey] of Object.entries(runtimeChannelKeys)) {
+    addAttempt(configuredChannel, configuredKey);
+  }
+
+  // Safety fallback
+  addAttempt(config.meshtastic.defaultChannel, config.meshtastic.defaultKey);
+
+  if (attempts.length === 0) return [];
+  if (!Number.isFinite(packetChannelHash)) return attempts;
+
+  // MeshPacket.channel carries a hash hint (xor(channelNameBytes) ^ xor(keyBytes)).
+  // If at least one candidate hash matches, only keep matching candidates.
+  const expectedHash = packetChannelHash >>> 0;
+  const hashMatchedAttempts = attempts.filter(({ channel, keyBase64 }) => {
+    try {
+      return (generateChannelHash(channel, keyBase64) >>> 0) === expectedHash;
+    } catch {
+      return false;
+    }
+  });
+
+  return hashMatchedAttempts.length > 0 ? hashMatchedAttempts : attempts;
 }
 
 function decodePlaintextPacket(packet) {
@@ -693,6 +771,7 @@ async function publishProtobufMessage(ws, { root, region, path, channel, gateway
   const toNode = parseNodeId(to);
   const packetId = generatePacketId();
   const effectiveKey = key || config.meshtastic.defaultKey;
+  rememberChannelKey(channel, effectiveKey);
 
   // Build topic: msh/EU_868/2/e/LongFast/!gateway
   const topic = buildTopic({ root, region, path, channel, gatewayId });

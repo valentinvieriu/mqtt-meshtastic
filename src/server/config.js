@@ -26,6 +26,56 @@ function loadEnv() {
 
 loadEnv();
 
+function parseChannelKeys(raw) {
+  const input = String(raw || '').trim();
+  if (!input) return {};
+
+  const parsedEntries = [];
+
+  // Preferred format: JSON object, e.g. {"LongFast":"AQ==","MyPrivate":"base64..."}
+  if (input.startsWith('{')) {
+    try {
+      const parsed = JSON.parse(input);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        for (const [channel, key] of Object.entries(parsed)) {
+          if (!channel || typeof key !== 'string') continue;
+          parsedEntries.push([channel.trim(), key.trim()]);
+        }
+      }
+    } catch {
+      console.warn('[Config] Failed to parse CHANNEL_KEYS JSON, falling back to key:value list parsing');
+    }
+  }
+
+  // Fallback format: "LongFast:AQ==,MyPrivate:BASE64"
+  if (parsedEntries.length === 0) {
+    for (const chunk of input.split(',')) {
+      const item = chunk.trim();
+      if (!item) continue;
+      const separator = item.includes(':') ? ':' : '=';
+      const [channel, ...keyParts] = item.split(separator);
+      const key = keyParts.join(separator).trim();
+      if (!channel?.trim() || !key) continue;
+      parsedEntries.push([channel.trim(), key]);
+    }
+  }
+
+  return Object.fromEntries(parsedEntries);
+}
+
+// DEFAULT_KEY intentionally defaults to Meshtastic shorthand ("AQ=="), not expanded base64.
+const defaultChannel = process.env.DEFAULT_CHANNEL || 'LongFast';
+const defaultKey = process.env.DEFAULT_KEY || 'AQ==';
+// Optional per-channel map used by server-side decryption key selection:
+// - JSON object: CHANNEL_KEYS={"LongFast":"AQ==","Ops":"base64..."}
+// - Fallback list: CHANNEL_KEYS=LongFast:AQ==,Ops:base64...
+const channelKeys = parseChannelKeys(process.env.CHANNEL_KEYS);
+
+// Ensure DEFAULT_CHANNEL always has a key candidate even if CHANNEL_KEYS is omitted.
+if (defaultChannel && defaultKey && !channelKeys[defaultChannel]) {
+  channelKeys[defaultChannel] = defaultKey;
+}
+
 export const config = {
   // Server
   port: parseInt(process.env.PORT || '3000', 10),
@@ -49,10 +99,11 @@ export const config = {
     get rootTopic() {
       return `${this.mqttRoot}/${this.region}/${this.defaultPath}`;
     },
-    defaultChannel: process.env.DEFAULT_CHANNEL || 'LongFast',
-    // The expanded default key for LongFast channel (derived from AQ== + channel hash)
-    // See: https://github.com/pdxlocations/connect
-    defaultKey: process.env.DEFAULT_KEY || '1PG7OiApB1nwvP+rz05pAQ==',
+    defaultChannel,
+    // Meshtastic-compatible PSK string (supports shorthand like AQ==, Ag==... or full 16/32-byte base64 keys)
+    defaultKey,
+    // Optional per-channel PSKs from CHANNEL_KEYS (plus defaultChannel/defaultKey injected above)
+    channelKeys,
     gatewayId: process.env.GATEWAY_ID || '!ffffffff',
   },
 };

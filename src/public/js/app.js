@@ -24,10 +24,33 @@ const state = {
     senderAuto: true,
     receiverId: '^all',
     message: 'Hello from web!',
-    key: '1PG7OiApB1nwvP+rz05pAQ==',
+    key: 'AQ==',
+  },
+  // Source-of-truth defaults used by quick reset actions
+  defaults: {
+    watch: {
+      root: 'msh',
+      region: 'EU_868',
+      path: '2/e',
+      channel: 'LongFast',
+    },
+    send: {
+      root: 'msh',
+      region: 'EU_868',
+      path: '2/e',
+      channel: 'LongFast',
+      gatewayId: '!d844b556',
+      senderId: '!d844b556',
+      receiverId: '^all',
+      key: 'AQ==',
+    },
   },
   // UI state
   filter: 'all',
+  nodeFilters: {
+    from: [],
+    to: [],
+  },
   subscriptions: [],
   activeView: 'watch',
   sidebarCollapsed: false,
@@ -36,6 +59,7 @@ const state = {
 };
 
 const FILTERS = ['all', 'text', 'position', 'telemetry', 'nodeinfo', 'routing', 'neighbor'];
+const NODE_FILTER_FIELDS = ['from', 'to'];
 
 const FILTER_MATCHERS = {
   all: () => true,
@@ -230,30 +254,51 @@ async function init() {
     const res = await fetch('/api/config');
     const config = await res.json();
 
-    // Populate both watch and send with server defaults
-    state.watch.root = config.mqttRoot || 'msh';
-    state.watch.region = config.region || 'EU_868';
-    state.watch.path = config.defaultPath || '2/e';
-    state.watch.channel = config.defaultChannel || 'LongFast';
+    // Build UI defaults from server config (fallback to built-ins)
+    state.defaults.watch.root = config.mqttRoot || state.defaults.watch.root;
+    state.defaults.watch.region = config.region || state.defaults.watch.region;
+    state.defaults.watch.path = config.defaultPath || state.defaults.watch.path;
+    state.defaults.watch.channel = config.defaultChannel || state.defaults.watch.channel;
 
-    state.send.root = config.mqttRoot || 'msh';
-    state.send.region = config.region || 'EU_868';
-    state.send.path = config.defaultPath || '2/e';
-    state.send.channel = config.defaultChannel || 'LongFast';
-    state.send.gatewayId = config.gatewayId || '!ffffffff';
-    state.send.senderId = config.gatewayId || '!ffffffff';
+    state.defaults.send.root = config.mqttRoot || state.defaults.send.root;
+    state.defaults.send.region = config.region || state.defaults.send.region;
+    state.defaults.send.path = config.defaultPath || state.defaults.send.path;
+    state.defaults.send.channel = config.defaultChannel || state.defaults.send.channel;
+    state.defaults.send.gatewayId = config.gatewayId || state.defaults.send.gatewayId;
+    state.defaults.send.senderId = state.defaults.send.gatewayId;
+    state.defaults.send.key = config.defaultKey || state.defaults.send.key;
+
+    // Populate current state from defaults
+    state.watch.root = state.defaults.watch.root;
+    state.watch.region = state.defaults.watch.region;
+    state.watch.path = state.defaults.watch.path;
+    state.watch.channel = state.defaults.watch.channel;
+
+    state.send.root = state.defaults.send.root;
+    state.send.region = state.defaults.send.region;
+    state.send.path = state.defaults.send.path;
+    state.send.channel = state.defaults.send.channel;
+    state.send.gatewayId = state.defaults.send.gatewayId;
+    state.send.senderId = state.defaults.send.senderId;
+    state.send.receiverId = state.defaults.send.receiverId;
+    state.send.key = state.defaults.send.key;
 
     // Populate Watch inputs
     $('#watch-root').value = state.watch.root;
     $('#watch-region').value = state.watch.region;
     $('#watch-path-select').value = state.watch.path;
+    applyChannelSelection('watch', state.watch.channel);
 
     // Populate Send inputs
     $('#send-root').value = state.send.root;
     $('#send-region').value = state.send.region;
     $('#send-path-select').value = state.send.path;
+    applyChannelSelection('send', state.send.channel);
     $('#gateway-id').value = state.send.gatewayId;
     $('#sender-id').value = state.send.senderId;
+    $('#receiver-id').value = state.send.receiverId;
+    $('#encryption-key').value = state.send.key;
+    updateDefaultKeyHint();
 
     // Status bar
     const regionText = $('#statusbar-region-text');
@@ -325,6 +370,9 @@ async function init() {
     generatePreview();
   });
 
+  // Quick default/preset actions
+  setupDefaultActions();
+
   // Copy buttons
   $('#copy-topic').addEventListener('click', () => copyToClipboard($('#out-topic').textContent));
   $('#copy-payload').addEventListener('click', () => copyToClipboard($('#out-payload').textContent));
@@ -341,6 +389,8 @@ async function init() {
 
   // Filters
   setupFilterButtons();
+  setupNodeFilterControls();
+  renderNodeFilterChips();
   $('#clear-log')?.addEventListener('click', clearLog);
 
   // Detail panel close
@@ -405,6 +455,88 @@ function setupSidebarSections() {
   });
 }
 
+// =============== Defaults & Presets ===============
+
+function getDefaultChannel(scope) {
+  if (scope === 'watch') return state.defaults.watch.channel || 'LongFast';
+  return state.defaults.send.channel || 'LongFast';
+}
+
+function applyChannelSelection(scope, channel) {
+  const select = $(`#${scope}-channel-select`);
+  const customInput = $(`#${scope}-channel-custom`);
+  if (!select || !customInput) return;
+
+  const normalized = String(channel || getDefaultChannel(scope)).trim();
+  const hasPreset = Array.from(select.options).some(option => option.value === normalized && option.value !== 'custom');
+
+  if (hasPreset) {
+    select.value = normalized;
+    customInput.value = '';
+    customInput.classList.add('hidden');
+  } else {
+    select.value = 'custom';
+    customInput.value = normalized || getDefaultChannel(scope);
+    customInput.classList.remove('hidden');
+  }
+}
+
+function updateDefaultKeyHint() {
+  const hint = $('#encryption-key-hint');
+  if (!hint) return;
+  hint.textContent = `Meshtastic-compatible PSK. Default: ${state.defaults.send.key}`;
+}
+
+function applyReceiverPreset(value) {
+  const receiverInput = $('#receiver-id');
+  if (!receiverInput) return;
+  receiverInput.value = value;
+  syncSendState();
+  generatePreview();
+}
+
+function applyKeyPreset(value) {
+  const keyInput = $('#encryption-key');
+  if (!keyInput) return;
+  keyInput.value = value;
+  syncSendState();
+  generatePreview();
+}
+
+function setupDefaultActions() {
+  $('#watch-channel-default-btn')?.addEventListener('click', () => {
+    applyChannelSelection('watch', state.defaults.watch.channel);
+    syncWatchState();
+  });
+
+  $('#send-channel-default-btn')?.addEventListener('click', () => {
+    const defaultSendChannel = state.send.path === '2/json' ? 'mqtt' : state.defaults.send.channel;
+    applyChannelSelection('send', defaultSendChannel);
+    syncSendState();
+    generatePreview();
+  });
+
+  $('#gateway-default-btn')?.addEventListener('click', () => {
+    const gatewayInput = $('#gateway-id');
+    if (!gatewayInput) return;
+    gatewayInput.value = state.defaults.send.gatewayId;
+    syncSendState();
+    updateSenderUI();
+    generatePreview();
+  });
+
+  $('#receiver-broadcast-btn')?.addEventListener('click', () => applyReceiverPreset('^all'));
+  $('#receiver-gateway-btn')?.addEventListener('click', () => applyReceiverPreset(state.send.gatewayId || state.defaults.send.gatewayId));
+  $('#receiver-default-btn')?.addEventListener('click', () => applyReceiverPreset(state.defaults.send.receiverId));
+
+  $('#key-default-btn')?.addEventListener('click', () => applyKeyPreset(state.defaults.send.key));
+  // Meshtastic shorthand presets (default + simple channels).
+  $('#key-short-btn')?.addEventListener('click', () => applyKeyPreset('AQ=='));
+  $('#key-simple1-btn')?.addEventListener('click', () => applyKeyPreset('Ag=='));
+  $('#key-simple2-btn')?.addEventListener('click', () => applyKeyPreset('Aw=='));
+  $('#key-simple3-btn')?.addEventListener('click', () => applyKeyPreset('BA=='));
+}
+
 // =============== Watch State ===============
 
 function syncWatchState() {
@@ -414,7 +546,7 @@ function syncWatchState() {
 
   const channelSelect = $('#watch-channel-select');
   if (channelSelect.value === 'custom') {
-    state.watch.channel = $('#watch-channel-custom').value || 'LongFast';
+    state.watch.channel = $('#watch-channel-custom').value || getDefaultChannel('watch');
     $('#watch-channel-custom').classList.remove('hidden');
   } else {
     state.watch.channel = channelSelect.value;
@@ -441,7 +573,7 @@ function syncSendState() {
 
   const channelSelect = $('#send-channel-select');
   if (channelSelect.value === 'custom') {
-    state.send.channel = $('#send-channel-custom').value || 'LongFast';
+    state.send.channel = $('#send-channel-custom').value || getDefaultChannel('send');
     $('#send-channel-custom').classList.remove('hidden');
   } else {
     state.send.channel = channelSelect.value;
@@ -555,6 +687,103 @@ function setupFilterButtons() {
   });
 }
 
+function setupNodeFilterControls() {
+  const container = $('#node-filter-pills');
+  const clearBtn = $('#clear-node-filters');
+
+  clearBtn?.addEventListener('click', clearNodeFilters);
+
+  container?.addEventListener('click', (event) => {
+    const target = event.target instanceof Element ? event.target : null;
+    const button = target?.closest('[data-remove-node-filter]');
+    if (!button) return;
+
+    const field = button.dataset.field;
+    const value = decodeURIComponent(button.dataset.value || '');
+    removeNodeFilter(field, value);
+  });
+}
+
+function toggleNodeFilter(field, value) {
+  if (!NODE_FILTER_FIELDS.includes(field)) return;
+
+  const normalized = normalizeNodeFilterValue(value);
+  if (!normalized) return;
+
+  const filters = state.nodeFilters[field];
+  const exists = filters.includes(normalized);
+
+  state.nodeFilters[field] = exists
+    ? filters.filter(item => item !== normalized)
+    : [...filters, normalized];
+
+  renderNodeFilterChips();
+  applyFilter();
+}
+
+function removeNodeFilter(field, value) {
+  if (!NODE_FILTER_FIELDS.includes(field)) return;
+
+  const normalized = normalizeNodeFilterValue(value);
+  if (!normalized) return;
+
+  state.nodeFilters[field] = state.nodeFilters[field].filter(item => item !== normalized);
+  renderNodeFilterChips();
+  applyFilter();
+}
+
+function clearNodeFilters() {
+  state.nodeFilters.from = [];
+  state.nodeFilters.to = [];
+  renderNodeFilterChips();
+  applyFilter();
+}
+
+function normalizeNodeFilterValue(value) {
+  const normalized = String(value || '').trim();
+  if (!normalized || normalized === '?') return '';
+  return normalized;
+}
+
+function hasNodeFilters() {
+  return state.nodeFilters.from.length > 0 || state.nodeFilters.to.length > 0;
+}
+
+function renderNodeFilterChips() {
+  const container = $('#node-filter-pills');
+  const clearBtn = $('#clear-node-filters');
+  if (!container) return;
+
+  const chips = [];
+
+  for (const field of NODE_FILTER_FIELDS) {
+    for (const value of state.nodeFilters[field]) {
+      chips.push({ field, value });
+    }
+  }
+
+  if (chips.length === 0) {
+    container.innerHTML = '<span class="node-filter-hint">Click From/To in activity to add filters</span>';
+  } else {
+    container.innerHTML = chips.map(({ field, value }) => `
+      <button
+        type="button"
+        class="filter-btn filter-active node-filter-chip"
+        data-remove-node-filter="1"
+        data-field="${field}"
+        data-value="${encodeURIComponent(value)}"
+        title="Remove ${field} filter"
+      >
+        <span class="node-filter-chip-label">${field}:</span>
+        <span class="node-filter-chip-value">${escapeHtml(value)}</span>
+        <span class="node-filter-chip-close">&times;</span>
+      </button>
+    `).join('');
+  }
+
+  if (clearBtn) clearBtn.classList.toggle('hidden', chips.length === 0);
+}
+
 function updateFilterButtons() {
   FILTERS.forEach(filter => {
     const btn = $(`#filter-${filter}`);
@@ -569,9 +798,25 @@ function applyFilter() {
   log.querySelectorAll('[data-portname]').forEach(entry => {
     const portName = entry.dataset.portname;
     const topic = entry.dataset.topic || '';
+    const from = entry.dataset.from || '';
+    const to = entry.dataset.to || '';
     const matcher = FILTER_MATCHERS[state.filter] || FILTER_MATCHERS.all;
-    entry.style.display = (matcher(portName) && isTopicVisible(topic)) ? 'block' : 'none';
+    entry.style.display = (
+      matcher(portName)
+      && isTopicVisible(topic)
+      && matchesNodeFilters(from, to)
+    ) ? 'block' : 'none';
   });
+
+  const selectedEntry = log.querySelector('.selected');
+  if (selectedEntry && selectedEntry.style.display === 'none') closeDetailPanel();
+}
+
+function matchesNodeFilters(from, to) {
+  if (!hasNodeFilters()) return true;
+  if (state.nodeFilters.from.length > 0 && !state.nodeFilters.from.includes(from)) return false;
+  if (state.nodeFilters.to.length > 0 && !state.nodeFilters.to.includes(to)) return false;
+  return true;
 }
 
 function isTopicVisible(msgTopic) {
@@ -646,6 +891,8 @@ function addToLog(direction, data) {
   const isIn = direction === 'in';
   entry.dataset.portname = data.portName || (data.raw ? 'raw' : 'sent');
   if (data.topic) entry.dataset.topic = data.topic;
+  if (data.from) entry.dataset.from = data.from;
+  if (data.to) entry.dataset.to = data.to;
 
   // Store full data on the element for detail panel
   entry._messageData = data;
@@ -675,9 +922,13 @@ function addToLog(direction, data) {
         </div>
       </div>
       <div class="mt-1 flex items-center gap-1 text-[11px]">
-        <span class="text-purple-400 font-mono">${data.from}</span>
+        <button type="button" class="log-node-link log-node-from font-mono" data-node-role="from" title="Filter by sender">
+          ${escapeHtml(data.from)}
+        </button>
         <span class="text-gray-500">→</span>
-        <span class="text-orange-400 font-mono">${data.to}</span>
+        <button type="button" class="log-node-link log-node-to font-mono" data-node-role="to" title="Filter by receiver">
+          ${escapeHtml(data.to)}
+        </button>
         <span class="text-yellow-500/70 ml-2 text-[10px]">${data.channel || ''}</span>
       </div>
       ${portConfig.content}
@@ -703,6 +954,13 @@ function addToLog(direction, data) {
       <div class="text-gray-200 mt-1">${escapeHtml(data.text)}</div>
     `;
   }
+
+  entry.querySelectorAll('[data-node-role]').forEach(button => {
+    button.addEventListener('click', (event) => {
+      event.stopPropagation();
+      toggleNodeFilter(button.dataset.nodeRole, button.textContent);
+    });
+  });
 
   // Click to open detail panel
   entry.addEventListener('click', () => selectLogEntry(entry));

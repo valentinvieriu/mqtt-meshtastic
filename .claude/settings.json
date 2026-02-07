@@ -35,7 +35,7 @@
       "Bash(mkdir:*)",
       "Bash(mv:*)",
       "Bash(cp:*)",
-
+      "Read(./.env.example)",
       "ExitPlanMode"
     ],
     "ask": ["Bash(git commit --amend:*)"],

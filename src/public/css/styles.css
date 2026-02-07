@@ -304,6 +304,64 @@ body {
   justify-content: space-between;
 }
 
+.sidebar-label-with-actions {
+  display: flex !important;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.field-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.field-action-btn {
+  background: #2d2d30;
+  border: 1px solid #3c3c3c;
+  color: #a8a8a8;
+  border-radius: 3px;
+  font-size: 10px;
+  line-height: 1;
+  padding: 3px 6px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.field-action-btn:hover {
+  background: #3a3a3d;
+  color: #d4d4d4;
+  border-color: #4a4a4a;
+}
+
+.sidebar-presets {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.preset-btn {
+  background: #2d2d30;
+  border: 1px solid #3c3c3c;
+  color: #9f9f9f;
+  border-radius: 3px;
+  font-size: 10px;
+  line-height: 1;
+  padding: 3px 6px;
+  cursor: pointer;
+  font-family: 'Menlo', 'Consolas', monospace;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.preset-btn:hover {
+  background: #3a3a3d;
+  color: #d4d4d4;
+  border-color: #4a4a4a;
+}
+
 .auto-toggle {
   display: flex;
   align-items: center;
@@ -558,6 +616,43 @@ body {
   color: #f44747;
 }
 
+.node-filter-pills {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 6px;
+  padding-left: 6px;
+  border-left: 1px solid #3c3c3c;
+}
+
+.node-filter-hint {
+  color: #585858;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.node-filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.node-filter-chip-label {
+  font-size: 9px;
+  opacity: 0.85;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.node-filter-chip-value {
+  font-family: 'Menlo', 'Consolas', monospace;
+}
+
+.node-filter-chip-close {
+  font-size: 12px;
+  line-height: 1;
+}
+
 /* Watch split: activity log + detail panel side by side */
 .watch-split {
   flex: 1;
@@ -607,6 +702,32 @@ body {
 #activity-log > div.selected {
   outline: 1px solid #007acc;
   outline-offset: -1px;
+}
+
+.log-node-link {
+  border: none;
+  background: transparent;
+  padding: 0 2px;
+  border-radius: 2px;
+  cursor: pointer;
+  font-size: 11px;
+  transition: background 0.15s, color 0.15s;
+}
+
+.log-node-link:hover {
+  background: rgba(60, 60, 60, 0.8);
+}
+
+.log-node-link:focus-visible {
+  outline: 1px solid #007acc;
+}
+
+.log-node-from {
+  color: #c586c0;
+}
+
+.log-node-to {
+  color: #d19a66;
 }
 
 /* Detail Panel */

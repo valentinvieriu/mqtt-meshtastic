@@ -72,10 +72,21 @@
             </div>
 
             <div class="sidebar-field">
-              <label>Channel</label>
+              <label class="sidebar-label-with-actions">
+                <span>Channel</span>
+                <span class="field-actions">
+                  <button type="button" id="watch-channel-default-btn" class="field-action-btn" title="Reset to default channel">Default</button>
+                </span>
+              </label>
               <div class="sidebar-select-wrap">
                 <select id="watch-channel-select" class="watch-input sidebar-input sidebar-select">
-                  <option value="LongFast">LongFast (Default)</option>
+                  <option value="LongFast">LongFast</option>
+                  <option value="LongSlow">LongSlow</option>
+                  <option value="MediumFast">MediumFast</option>
+                  <option value="MediumSlow">MediumSlow</option>
+                  <option value="ShortFast">ShortFast</option>
+                  <option value="ShortSlow">ShortSlow</option>
+                  <option value="VeryLongSlow">VeryLongSlow</option>
                   <option value="mqtt">mqtt</option>
                   <option value="custom">Custom...</option>
                 </select>
@@ -139,10 +150,21 @@
             </div>
 
             <div class="sidebar-field">
-              <label>Channel</label>
+              <label class="sidebar-label-with-actions">
+                <span>Channel</span>
+                <span class="field-actions">
+                  <button type="button" id="send-channel-default-btn" class="field-action-btn" title="Reset to default channel">Default</button>
+                </span>
+              </label>
               <div class="sidebar-select-wrap">
                 <select id="send-channel-select" class="send-input sidebar-input sidebar-select">
-                  <option value="LongFast">LongFast (Default)</option>
+                  <option value="LongFast">LongFast</option>
+                  <option value="LongSlow">LongSlow</option>
+                  <option value="MediumFast">MediumFast</option>
+                  <option value="MediumSlow">MediumSlow</option>
+                  <option value="ShortFast">ShortFast</option>
+                  <option value="ShortSlow">ShortSlow</option>
+                  <option value="VeryLongSlow">VeryLongSlow</option>
                   <option value="mqtt">mqtt</option>
                   <option value="custom">Custom...</option>
                 </select>
@@ -173,7 +195,12 @@
             </div>
 
             <div class="sidebar-field">
-              <label>Gateway ID</label>
+              <label class="sidebar-label-with-actions">
+                <span>Gateway ID</span>
+                <span class="field-actions">
+                  <button type="button" id="gateway-default-btn" class="field-action-btn" title="Reset gateway to default">Default</button>
+                </span>
+              </label>
               <input type="text" id="gateway-id" value="!d844b556" class="send-input sidebar-input font-mono">
             </div>
 
@@ -193,6 +220,11 @@
                 <label>Receiver</label>
                 <input type="text" id="receiver-id" value="^all" placeholder="!hex or ^all" class="send-input sidebar-input font-mono">
                 <div class="sidebar-hint font-mono" id="receiver-int">Int: -</div>
+                <div class="sidebar-presets">
+                  <button type="button" id="receiver-broadcast-btn" class="preset-btn">^all</button>
+                  <button type="button" id="receiver-gateway-btn" class="preset-btn">Gateway</button>
+                  <button type="button" id="receiver-default-btn" class="preset-btn">Default</button>
+                </div>
               </div>
             </div>
 
@@ -202,9 +234,20 @@
             </div>
 
             <div class="sidebar-field" id="key-group">
-              <label>Encryption Key</label>
-              <input type="text" id="encryption-key" value="1PG7OiApB1nwvP+rz05pAQ==" class="send-input sidebar-input font-mono">
-              <div class="sidebar-hint">Default LongFast key (expanded)</div>
+              <label class="sidebar-label-with-actions">
+                <span>Encryption Key</span>
+                <span class="field-actions">
+                  <button type="button" id="key-default-btn" class="field-action-btn" title="Reset key to default">Default</button>
+                </span>
+              </label>
+              <input type="text" id="encryption-key" value="AQ==" class="send-input sidebar-input font-mono">
+              <div class="sidebar-hint" id="encryption-key-hint">Default key from server config</div>
+              <div class="sidebar-presets">
+                <button type="button" id="key-short-btn" class="preset-btn" title="Meshtastic Default">AQ==</button>
+                <button type="button" id="key-simple1-btn" class="preset-btn" title="Meshtastic Simple 1">Ag==</button>
+                <button type="button" id="key-simple2-btn" class="preset-btn" title="Meshtastic Simple 2">Aw==</button>
+                <button type="button" id="key-simple3-btn" class="preset-btn" title="Meshtastic Simple 3">BA==</button>
+              </div>
             </div>
 
             <button id="send-btn" class="sidebar-btn sidebar-btn-send">
@@ -233,6 +276,10 @@
             <button id="filter-nodeinfo" class="filter-btn">Nodes</button>
             <button id="filter-routing" class="filter-btn">Routing</button>
             <button id="filter-neighbor" class="filter-btn">Neighbors</button>
+            <div id="node-filter-pills" class="node-filter-pills">
+              <span class="node-filter-hint">Click From/To in activity to add filters</span>
+            </div>
+            <button id="clear-node-filters" class="filter-btn hidden" title="Clear from/to filters">Clear nodes</button>
             <button id="clear-log" class="filter-btn filter-btn-clear" title="Clear log">
               <i class="fas fa-trash-alt"></i>
             </button>
