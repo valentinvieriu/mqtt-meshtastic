@@ -43,6 +43,16 @@ export function createMqttClient({ autoSubscribeDefault = true, ...handlers } = 
   });
 
   client.on('message', (topic, message) => {
+    // Detect UTF-8 replacement corruption (EF BF BD) arriving from the broker.
+    // If present in the raw Buffer, the publishing gateway mangled binary→UTF-8→bytes.
+    if (Buffer.isBuffer(message) && message.length >= 3) {
+      for (let i = 0; i < message.length - 2; i++) {
+        if (message[i] === 0xef && message[i + 1] === 0xbf && message[i + 2] === 0xbd) {
+          console.log(`[MQTT] UTF-8 corruption in raw payload from broker on ${topic} (${message.length}B) — gateway is mangling binary as text`);
+          return; // Drop the message — the protobuf is irrecoverable
+        }
+      }
+    }
     handlers.onMessage?.(topic, message);
   });
 
