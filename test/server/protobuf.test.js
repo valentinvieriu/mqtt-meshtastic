@@ -5,6 +5,7 @@ import {
   decodeData,
   decodeMeshPacket,
   decodeServiceEnvelope,
+  decodeTraceroute,
   encodeData,
   encodeMeshPacket,
   encodeServiceEnvelope,
@@ -158,4 +159,74 @@ test('formatNodeId formats normal nodes and broadcast marker', () => {
   assert.equal(formatNodeId(0xd844b556), '!d844b556');
   assert.equal(formatNodeId(0x1), '!00000001');
   assert.equal(formatNodeId(0xffffffff), '^all');
+});
+
+// --- rxSnr / rxRssi tests ---
+
+test('decodeMeshPacket reads rxSnr as float from field 8', () => {
+  // Field 8, wiretype FIXED32 (5): tag = (8 << 3) | 5 = 0x45
+  const buf = Buffer.alloc(5);
+  buf[0] = 0x45;
+  buf.writeFloatLE(7.5, 1);
+  const decoded = decodeMeshPacket(buf, { logErrors: false });
+  assert.equal(decoded.rxSnr, 7.5);
+});
+
+test('decodeMeshPacket reads negative rxSnr', () => {
+  const buf = Buffer.alloc(5);
+  buf[0] = 0x45;
+  buf.writeFloatLE(-12.25, 1);
+  const decoded = decodeMeshPacket(buf, { logErrors: false });
+  assert.ok(Math.abs(decoded.rxSnr - (-12.25)) < 0.01);
+});
+
+test('decodeMeshPacket reads rxRssi as signed int32 from field 12', () => {
+  // Field 12 (varint): tag = (12 << 3) | 0 = 0x60
+  // -110 as protobuf varint (unsigned encoding of 4294967186): 0x92 0xFF 0xFF 0xFF 0x0F
+  const buf = Buffer.from([0x60, 0x92, 0xFF, 0xFF, 0xFF, 0x0F]);
+  const decoded = decodeMeshPacket(buf, { logErrors: false });
+  assert.equal(decoded.rxRssi, -110);
+});
+
+test('decodeMeshPacket defaults rxSnr and rxRssi to null', () => {
+  const decoded = decodeMeshPacket(Buffer.alloc(0), { logErrors: false });
+  assert.equal(decoded.rxSnr, null);
+  assert.equal(decoded.rxRssi, null);
+});
+
+// --- Traceroute SNR /4 scaling tests ---
+
+test('decodeTraceroute scales packed snr_towards by /4', () => {
+  // Field 2, wireType 2 (packed): tag = 0x12
+  // int8 values: 40, -8, -40 → should become 10, -2, -10
+  const buf = Buffer.from([0x12, 0x03, 40, 0xf8, 0xd8]);
+  const result = decodeTraceroute(buf);
+  assert.deepEqual(result.snrTowards, [10, -2, -10]);
+});
+
+test('decodeTraceroute scales packed snr_back by /4', () => {
+  // Field 4, wireType 2 (packed): tag = (4 << 3) | 2 = 0x22
+  // int8 values: 20, -4 → should become 5, -1
+  const buf = Buffer.from([0x22, 0x02, 20, 0xfc]);
+  const result = decodeTraceroute(buf);
+  assert.deepEqual(result.snrBack, [5, -1]);
+});
+
+test('decodeTraceroute handles zero SNR values', () => {
+  const buf = Buffer.from([0x12, 0x02, 0, 4]);
+  const result = decodeTraceroute(buf);
+  assert.deepEqual(result.snrTowards, [0, 1]);
+});
+
+test('decodeTraceroute roundtrip preserves route with SNR', () => {
+  // route: [0x01020304], snrTowards: [28 → 7 dB]
+  // Field 1 packed fixed32: tag=0x0a, len=4, value LE
+  // Field 2 packed int8: tag=0x12, len=1, value=28
+  const buf = Buffer.from([
+    0x0a, 0x04, 0x04, 0x03, 0x02, 0x01, // route: [0x01020304]
+    0x12, 0x01, 28,                       // snrTowards: [7.0]
+  ]);
+  const result = decodeTraceroute(buf);
+  assert.deepEqual(result.route, [0x01020304]);
+  assert.deepEqual(result.snrTowards, [7]);
 });

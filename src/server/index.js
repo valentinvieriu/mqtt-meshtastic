@@ -538,6 +538,8 @@ function handleMqttMessage(topic, rawMessage) {
         hopLimit: packet.hopLimit,
         hopStart: packet.hopStart,
         rxTime: packet.rxTime,
+        rxSnr: packet.rxSnr,
+        rxRssi: packet.rxRssi,
         viaMqtt: packet.viaMqtt,
         portnum,
         portName: getPortName(portnum),

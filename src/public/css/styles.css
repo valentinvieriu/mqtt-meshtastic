@@ -754,6 +754,51 @@ body {
   line-height: 1;
 }
 
+/* Node filter manual input */
+.node-filter-add {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 4px;
+}
+
+.node-filter-select {
+  background: #3c3c3c;
+  border: 1px solid #3c3c3c;
+  color: #cccccc;
+  font-size: 10px;
+  padding: 1px 4px;
+  border-radius: 2px;
+  outline: none;
+  height: 22px;
+  cursor: pointer;
+}
+
+.node-filter-select:focus {
+  border-color: #007acc;
+}
+
+.node-filter-input {
+  background: #3c3c3c;
+  border: 1px solid #3c3c3c;
+  color: #cccccc;
+  font-size: 10px;
+  font-family: 'Menlo', 'Consolas', monospace;
+  padding: 1px 6px;
+  border-radius: 2px;
+  outline: none;
+  width: 90px;
+  height: 22px;
+}
+
+.node-filter-input:focus {
+  border-color: #007acc;
+}
+
+.node-filter-input::placeholder {
+  color: #585858;
+}
+
 /* Watch split: activity log + detail panel side by side */
 .watch-split {
   flex: 1;
@@ -1779,14 +1824,37 @@ input[type="checkbox"] {
 .map-legend-line {
   width: 20px;
   height: 0;
-  border-top: 2px dashed;
   flex-shrink: 0;
 }
 
-.map-legend-line-gray { border-color: #858585; }
-.map-legend-line-amber { border-color: #f59e0b; }
-.map-legend-line-teal { border-color: #14b8a6; }
-.map-legend-line-blue { border-color: #007acc; }
+.map-legend-line-solid {
+  border-top: 2px solid #84cc16;
+}
+
+.map-legend-line-dashed {
+  border-top: 2px dashed #858585;
+}
+
+/* SNR gradient bar */
+.map-legend-snr {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid #3c3c3c;
+}
+
+.map-legend-snr-bar {
+  height: 6px;
+  border-radius: 3px;
+  background: linear-gradient(to right, #ef4444, #f97316, #eab308, #84cc16, #22c55e);
+}
+
+.map-legend-snr-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 9px;
+  color: #858585;
+  margin-top: 2px;
+}
 
 /* Permanent node name labels on map */
 .node-map-label {

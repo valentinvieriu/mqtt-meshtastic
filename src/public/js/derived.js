@@ -3,10 +3,25 @@
 // Stored in memory only.
 
 const HISTORY_MAX = 50;
+const RF_LINK_SNR_WINDOW = 20;
 
 function formatNodeIdHex(num) {
   if (!num) return null;
   return `!${(num >>> 0).toString(16).padStart(8, '0')}`;
+}
+
+function normalizeNodeId(nodeId) {
+  if (typeof nodeId === 'number' && Number.isFinite(nodeId)) {
+    return `!${(nodeId >>> 0).toString(16).padStart(8, '0')}`;
+  }
+  if (typeof nodeId !== 'string') return null;
+  const v = nodeId.trim();
+  if (!v) return null;
+  if (v === '?' || v === '^all') return v;
+  if (v.startsWith('!') && /^[0-9a-fA-F]+$/.test(v.slice(1))) {
+    return `!${v.slice(1).toLowerCase().padStart(8, '0')}`;
+  }
+  return v;
 }
 
 function isRealNodeId(nodeId) {
@@ -18,6 +33,7 @@ export class DerivedState {
     this.nodes = {};     // keyed by nodeId ("!hex")
     this.gateways = {};  // keyed by gatewayId ("!hex")
     this.links = {};     // keyed by "from->to"
+    this.rfLinks = {};   // keyed by "a|b" (sorted pair) — RF link evidence
     this._listeners = [];
   }
 
@@ -40,6 +56,7 @@ export class DerivedState {
     this.nodes = {};
     this.gateways = {};
     this.links = {};
+    this.rfLinks = {};
 
     for (const event of events) {
       this._processEvent(event, true);
@@ -168,6 +185,80 @@ export class DerivedState {
       link.packetCount++;
     }
 
+    // --- RF Links ---
+
+    // 1. Direct RF detection: gateway physically received sender's RF signal
+    if (hasGateway && isRealNodeId(event.fromNodeId) && event.gatewayId !== event.fromNodeId) {
+      const hasSnr = event.rxSnr != null;
+      const isDirectHop = event.hopStart > 0 && event.hopStart === event.hopLimit;
+      if (hasSnr || isDirectHop) {
+        this._updateRfLink(event.fromNodeId, event.gatewayId, {
+          type: 'directRf', ts,
+          snr: hasSnr ? event.rxSnr : null,
+          rssi: event.rxRssi ?? null,
+        });
+      }
+    }
+
+    // 2. NeighborInfo (portnum 71): each neighbor is a confirmed RF link
+    if (event.portnum === 71 && event.decodedPayload?.neighbors) {
+      const reporterNodeId = event.fromNodeId;
+      for (const n of event.decodedPayload.neighbors) {
+        if (!n.nodeId) continue;
+        const neighborId = typeof n.nodeId === 'number' ? formatNodeIdHex(n.nodeId) : n.nodeId;
+        if (!neighborId || !isRealNodeId(neighborId)) continue;
+        this._updateRfLink(reporterNodeId, neighborId, {
+          type: 'neighbor', ts,
+          snr: n.snr ?? null,
+          rssi: null,
+        });
+      }
+    }
+
+    // 3. Traceroute (portnum 70): consecutive hop pairs
+    if (event.portnum === 70 && event.decodedPayload) {
+      const tr = event.decodedPayload;
+      // Forward path: [from, ...route, to]
+      if (Array.isArray(tr.route)) {
+        const fwdChain = [event.fromNodeId, ...tr.route.map(id => normalizeNodeId(id)).filter(isRealNodeId)];
+        if (isRealNodeId(event.toNodeId)) fwdChain.push(event.toNodeId);
+        const snrFwd = tr.snrTowards || [];
+        for (let i = 0; i < fwdChain.length - 1; i++) {
+          this._updateRfLink(fwdChain[i], fwdChain[i + 1], {
+            type: 'traceroute', ts,
+            snr: i < snrFwd.length ? snrFwd[i] : null,
+            rssi: null,
+          });
+        }
+      }
+      // Back path: [to, ...routeBack, from]
+      if (Array.isArray(tr.routeBack) && tr.routeBack.length > 0) {
+        const backChain = [];
+        if (isRealNodeId(event.toNodeId)) backChain.push(event.toNodeId);
+        backChain.push(...tr.routeBack.map(id => normalizeNodeId(id)).filter(isRealNodeId));
+        backChain.push(event.fromNodeId);
+        const snrBack = tr.snrBack || [];
+        for (let i = 0; i < backChain.length - 1; i++) {
+          this._updateRfLink(backChain[i], backChain[i + 1], {
+            type: 'traceroute', ts,
+            snr: i < snrBack.length ? snrBack[i] : null,
+            rssi: null,
+          });
+        }
+      }
+    }
+
+    // 4. General packet links (skip portnums 70/71 to avoid double-counting)
+    if (event.portnum !== 70 && event.portnum !== 71 &&
+        isRealNodeId(event.fromNodeId) && isRealNodeId(event.toNodeId) &&
+        event.fromNodeId !== event.toNodeId) {
+      this._updateRfLink(event.fromNodeId, event.toNodeId, {
+        type: 'packet', ts,
+        snr: null,
+        rssi: null,
+      });
+    }
+
     if (!isBulk) {
       this._notify(event);
     }
@@ -228,6 +319,63 @@ export class DerivedState {
       };
     }
     return this.links[linkId];
+  }
+
+  _updateRfLink(nodeA, nodeB, evidence) {
+    const a = normalizeNodeId(nodeA);
+    const b = normalizeNodeId(nodeB);
+    if (!isRealNodeId(a) || !isRealNodeId(b) || a === b) return;
+
+    const [lo, hi] = a < b ? [a, b] : [b, a];
+    const key = `${lo}|${hi}`;
+    let link = this.rfLinks[key];
+    if (!link) {
+      link = {
+        id: key,
+        a: lo,
+        b: hi,
+        directRfCount: 0,
+        neighborReportCount: 0,
+        tracerouteCount: 0,
+        packetCount: 0,
+        snrSamples: [],
+        rssiSamples: [],
+        aToB: 0,
+        bToA: 0,
+        firstSeenAt: null,
+        lastSeenAt: null,
+      };
+      this.rfLinks[key] = link;
+    }
+
+    const ts = evidence.ts || Date.now();
+    if (!link.firstSeenAt || ts < link.firstSeenAt) link.firstSeenAt = ts;
+    if (!link.lastSeenAt || ts > link.lastSeenAt) link.lastSeenAt = ts;
+
+    // Direction tracking
+    if (a === lo) { link.aToB++; } else { link.bToA++; }
+
+    // Evidence type counters
+    switch (evidence.type) {
+      case 'directRf': link.directRfCount++; break;
+      case 'neighbor': link.neighborReportCount++; break;
+      case 'traceroute': link.tracerouteCount++; break;
+      case 'packet': link.packetCount++; break;
+    }
+
+    // Rolling SNR/RSSI windows
+    if (evidence.snr != null && Number.isFinite(evidence.snr)) {
+      link.snrSamples.push(evidence.snr);
+      if (link.snrSamples.length > RF_LINK_SNR_WINDOW) link.snrSamples.shift();
+    }
+    if (evidence.rssi != null && Number.isFinite(evidence.rssi)) {
+      link.rssiSamples.push(evidence.rssi);
+      if (link.rssiSamples.length > RF_LINK_SNR_WINDOW) link.rssiSamples.shift();
+    }
+  }
+
+  getRfLinks() {
+    return Object.values(this.rfLinks);
   }
 
   // Get a display label for a node, using nodeInfo if available

@@ -272,7 +272,10 @@
               <label class="manage-checkbox-label"><input type="checkbox" id="map-show-links" checked> Show connections</label>
             </div>
             <div class="manage-form-field">
-              <label class="manage-checkbox-label"><input type="checkbox" id="map-show-gateways" checked> Show gateway links</label>
+              <label class="manage-checkbox-label" style="gap:8px">
+                Link age: <span id="map-link-age-label">24h</span>
+              </label>
+              <input type="range" id="map-link-age" min="1" max="48" value="24" style="width:100%;accent-color:#007acc">
             </div>
             <button id="map-fit-btn" class="sidebar-btn sidebar-btn-primary" style="margin-top:4px">
               <i class="fas fa-expand-arrows-alt"></i> Fit All Nodes
@@ -289,10 +292,16 @@
             <div class="map-legend-item"><span class="map-legend-dot map-legend-active"></span> Active (&lt;1h)</div>
             <div class="map-legend-item"><span class="map-legend-dot map-legend-recent"></span> Recent (&lt;24h)</div>
             <div class="map-legend-item"><span class="map-legend-dot map-legend-stale"></span> Stale (&gt;24h)</div>
-            <div class="map-legend-item"><span class="map-legend-line map-legend-line-gray"></span> Packet link</div>
-            <div class="map-legend-item"><span class="map-legend-line map-legend-line-amber"></span> RF neighbor link</div>
-            <div class="map-legend-item"><span class="map-legend-line map-legend-line-teal"></span> Traceroute link</div>
-            <div class="map-legend-item"><span class="map-legend-line map-legend-line-blue"></span> Gateway link</div>
+            <div class="map-legend-item"><span class="map-legend-line map-legend-line-solid"></span> Direct RF link</div>
+            <div class="map-legend-item"><span class="map-legend-line map-legend-line-dashed"></span> Inferred link</div>
+            <div class="map-legend-snr">
+              <div class="map-legend-snr-bar"></div>
+              <div class="map-legend-snr-labels">
+                <span>-10 dB</span>
+                <span>SNR</span>
+                <span>+10 dB</span>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -349,7 +358,15 @@
             <button id="filter-routing" class="filter-btn">Routing</button>
             <button id="filter-neighbor" class="filter-btn">Neighbors</button>
             <div id="node-filter-pills" class="node-filter-pills">
-              <span class="node-filter-hint">Click From/To in activity to add filters</span>
+              <span class="node-filter-hint">No node filters</span>
+            </div>
+            <div class="node-filter-add">
+              <select id="node-filter-field" class="node-filter-select" title="Filter field">
+                <option value="from">From</option>
+                <option value="to">To</option>
+              </select>
+              <input type="text" id="node-filter-input" class="node-filter-input" placeholder="!aabbccdd" title="Node ID to filter">
+              <button id="node-filter-add-btn" class="filter-btn" title="Add node filter"><i class="fas fa-plus"></i></button>
             </div>
             <button id="clear-node-filters" class="filter-btn hidden" title="Clear from/to filters">Clear nodes</button>
             <button id="clear-log" class="filter-btn filter-btn-clear" title="Clear log">

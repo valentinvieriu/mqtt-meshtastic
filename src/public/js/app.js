@@ -24,7 +24,7 @@ const state = {
   // Nodes view state
   nodesView: { selectedNodeId: null, searchQuery: '', sortBy: 'lastSeenAt' },
   // Map view state
-  mapView: { map: null, markers: {}, lines: [], gatewayLines: [], autoFit: true, showLinks: true, showGatewayLinks: true, initialized: false },
+  mapView: { map: null, markers: {}, lines: [], autoFit: true, showLinks: true, maxLinkAgeHours: 24, initialized: false },
   // Manage (Settings) view state
   manage: {
     selectedType: null,  // 'network' | 'key' | 'channel' | 'node'
@@ -38,6 +38,9 @@ const UI_PREFS_KEY = 'mqttMeshtastic.ui.v1';
 
 const FILTERS = ['all', 'text', 'position', 'telemetry', 'nodeinfo', 'routing', 'neighbor'];
 const NODE_FILTER_FIELDS = ['from', 'to'];
+const MAX_LOG_BUFFER = 10000;
+const MAX_LOG_DOM = 1000;
+const messageBuffer = [];
 
 const FILTER_MATCHERS = {
   all: () => true,
@@ -80,8 +83,9 @@ const PORT_CONFIGS = {
   POSITION: {
     bgClass: 'bg-green-900/30', borderClass: 'border-green-500',
     iconClass: 'text-green-400', labelClass: 'text-green-400', icon: '&#128205;',
-    content: ({ payload }) => {
+    content: ({ payload, from }) => {
       if (!payload) return '<div class="text-gray-500 mt-1 italic">No position data</div>';
+      const hasCoords = payload.latitude && payload.longitude;
       return `
         <div class="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-[10px]">
           <div><span class="text-gray-500">Lat:</span> <span class="text-green-300 font-mono">${payload.latitude?.toFixed(6) || '?'}&deg;</span></div>
@@ -89,7 +93,7 @@ const PORT_CONFIGS = {
           <div><span class="text-gray-500">Alt:</span> <span class="text-green-300 font-mono">${payload.altitude || 0}m</span></div>
           <div><span class="text-gray-500">Sats:</span> <span class="text-green-300 font-mono">${payload.satsInView || '?'}</span></div>
         </div>
-        ${payload.latitude && payload.longitude ? `<a href="https://www.google.com/maps?q=${payload.latitude},${payload.longitude}" target="_blank" class="mt-2 inline-block text-[10px] text-blue-400 hover:text-blue-300"><i class="fas fa-external-link-alt"></i> Open in Maps</a>` : ''}
+        ${hasCoords ? `<div class="mt-2 flex gap-3 text-[10px]"><a href="https://www.google.com/maps?q=${payload.latitude},${payload.longitude}" target="_blank" class="text-blue-400 hover:text-blue-300"><i class="fas fa-external-link-alt"></i> Open in Maps</a>${from ? `<a href="#" class="text-blue-400 hover:text-blue-300" data-show-on-map="${escapeHtml(from)}"><i class="fas fa-map-marked-alt"></i> Show on Map</a>` : ''}</div>` : ''}
       `;
     },
   },
@@ -178,7 +182,7 @@ const PORT_CONFIGS = {
   MAP_REPORT: {
     bgClass: 'bg-teal-900/30', borderClass: 'border-teal-500',
     iconClass: 'text-teal-400', labelClass: 'text-teal-400', icon: '&#128506;',
-    content: ({ payload }) => {
+    content: ({ payload, from }) => {
       if (!payload) return '<div class="text-gray-500 mt-1 text-[10px] italic">Map report</div>';
       let html = '<div class="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-[10px]">';
       if (payload.longName) html += `<div class="col-span-2"><span class="text-gray-500">Name:</span> <span class="text-teal-300 font-bold">${escapeHtml(payload.longName)}</span> <span class="text-teal-400/70">(${escapeHtml(payload.shortName || '?')})</span></div>`;
@@ -191,7 +195,12 @@ const PORT_CONFIGS = {
       if (payload.firmwareVersion) html += `<div><span class="text-gray-500">FW:</span> <span class="text-teal-300 font-mono">${escapeHtml(payload.firmwareVersion)}</span></div>`;
       if (payload.numOnlineLocalNodes) html += `<div><span class="text-gray-500">Online:</span> <span class="text-teal-300">${payload.numOnlineLocalNodes} nodes</span></div>`;
       html += '</div>';
-      if (payload.latitude && payload.longitude) html += `<a href="https://www.google.com/maps?q=${payload.latitude},${payload.longitude}" target="_blank" class="mt-2 inline-block text-[10px] text-blue-400 hover:text-blue-300"><i class="fas fa-external-link-alt"></i> Open in Maps</a>`;
+      if (payload.latitude && payload.longitude) {
+        html += `<div class="mt-2 flex gap-3 text-[10px]">`;
+        html += `<a href="https://www.google.com/maps?q=${payload.latitude},${payload.longitude}" target="_blank" class="text-blue-400 hover:text-blue-300"><i class="fas fa-external-link-alt"></i> Open in Maps</a>`;
+        if (from) html += `<a href="#" class="text-blue-400 hover:text-blue-300" data-show-on-map="${escapeHtml(from)}"><i class="fas fa-map-marked-alt"></i> Show on Map</a>`;
+        html += `</div>`;
+      }
       return html;
     },
   },
@@ -390,21 +399,47 @@ async function init() {
   renderManageLists();
   updateStatusBarNodeCount();
 
-  // Real-time updates from derived state
-  let derivedUpdateTimer = null;
-  derived.onChange(() => {
-    if (derivedUpdateTimer) return;
-    derivedUpdateTimer = setTimeout(() => {
-      derivedUpdateTimer = null;
-      if (state.activeView === 'nodes') {
-        renderNodesList();
-      }
-      if (state.activeView === 'map') {
-        updateMapMarkers();
-        renderMapNodesList();
-      }
-      updateStatusBarNodeCount();
-    }, 500);
+  // Real-time updates from derived state — separate throttles for cheap vs expensive views
+  let nodesUpdateTimer = null;
+  let mapUpdateTimer = null;
+  let mapDirty = false;           // any event since last map redraw
+  let mapPositionDirty = false;   // position/nodeinfo/neighbor event since last redraw
+
+  const MAP_PORTNUM_TRIGGERS = new Set([3, 4, 70, 71, 73]); // position, nodeinfo, traceroute, neighbor, mapreport
+
+  derived.onChange((event) => {
+    // Nodes view + status bar: 500ms throttle
+    if (!nodesUpdateTimer) {
+      nodesUpdateTimer = setTimeout(() => {
+        nodesUpdateTimer = null;
+        if (state.activeView === 'nodes') renderNodesList();
+        updateStatusBarNodeCount();
+      }, 500);
+    }
+
+    // Track what kind of data changed for the map
+    mapDirty = true;
+    if (event && MAP_PORTNUM_TRIGGERS.has(event.portnum)) {
+      mapPositionDirty = true;
+    }
+
+    // Map view: 5s throttle, only redraw if relevant data changed
+    if (state.activeView === 'map' && !mapUpdateTimer) {
+      mapUpdateTimer = setTimeout(() => {
+        mapUpdateTimer = null;
+        if (!mapDirty) return;
+        const needFullRedraw = mapPositionDirty;
+        mapDirty = false;
+        mapPositionDirty = false;
+        if (needFullRedraw) {
+          updateMapMarkers();
+          renderMapNodesList();
+        } else if (state.mapView.showLinks) {
+          // Only rfLinks may have changed (new packet/traceroute evidence)
+          updateMapLinks();
+        }
+      }, 5000);
+    }
   });
 }
 
@@ -664,7 +699,12 @@ function setupActivityBar() {
       } else if (view === 'map') {
         initMapView();
         setTimeout(() => {
-          if (state.mapView.map) state.mapView.map.invalidateSize();
+          if (state.mapView.map) {
+            state.mapView.map.invalidateSize();
+            // Flush any updates that accumulated while the map was hidden
+            updateMapMarkers();
+            renderMapNodesList();
+          }
         }, 100);
       }
     });
@@ -829,6 +869,27 @@ function setupNodeFilterControls() {
     const value = decodeURIComponent(button.dataset.value || '');
     removeNodeFilter(field, value);
   });
+
+  // Manual filter input
+  const addBtn = $('#node-filter-add-btn');
+  const input = $('#node-filter-input');
+  const fieldSelect = $('#node-filter-field');
+
+  function submitManualFilter() {
+    const field = fieldSelect?.value || 'from';
+    const value = input?.value?.trim();
+    if (!value) return;
+    addNodeFilter(field, value);
+    if (input) input.value = '';
+  }
+
+  addBtn?.addEventListener('click', submitManualFilter);
+  input?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      submitManualFilter();
+    }
+  });
 }
 
 function toggleNodeFilter(field, value) {
@@ -840,6 +901,17 @@ function toggleNodeFilter(field, value) {
   state.nodeFilters[field] = exists
     ? filters.filter(item => item !== normalized)
     : [...filters, normalized];
+  renderNodeFilterChips();
+  applyFilter();
+}
+
+function addNodeFilter(field, value) {
+  if (!NODE_FILTER_FIELDS.includes(field)) return;
+  const normalized = normalizeNodeFilterValue(value);
+  if (!normalized) return;
+  if (!state.nodeFilters[field].includes(normalized)) {
+    state.nodeFilters[field] = [...state.nodeFilters[field], normalized];
+  }
   renderNodeFilterChips();
   applyFilter();
 }
@@ -881,7 +953,7 @@ function renderNodeFilterChips() {
     }
   }
   if (chips.length === 0) {
-    container.innerHTML = '<span class="node-filter-hint">Click From/To in activity to add filters</span>';
+    container.innerHTML = '<span class="node-filter-hint">No node filters</span>';
   } else {
     container.innerHTML = chips.map(({ field, value }) => `
       <button type="button" class="filter-btn filter-active node-filter-chip"
@@ -902,21 +974,17 @@ function updateFilterButtons() {
   });
 }
 
+function entryMatchesFilters(direction, data) {
+  const portName = data.portName || (data.raw ? 'raw' : 'sent');
+  const topic = data.topic || '';
+  const from = data.from || '';
+  const to = data.to || '';
+  const matcher = FILTER_MATCHERS[state.filter] || FILTER_MATCHERS.all;
+  return matcher(portName) && isTopicVisible(topic) && matchesNodeFilters(from, to);
+}
+
 function applyFilter() {
-  const log = $('#activity-log');
-  if (!log) return;
-  log.querySelectorAll('[data-portname]').forEach(entry => {
-    const portName = entry.dataset.portname;
-    const topic = entry.dataset.topic || '';
-    const from = entry.dataset.from || '';
-    const to = entry.dataset.to || '';
-    const matcher = FILTER_MATCHERS[state.filter] || FILTER_MATCHERS.all;
-    entry.style.display = (
-      matcher(portName) && isTopicVisible(topic) && matchesNodeFilters(from, to)
-    ) ? 'block' : 'none';
-  });
-  const selectedEntry = log.querySelector('.selected');
-  if (selectedEntry && selectedEntry.style.display === 'none') closeDetailPanel();
+  rebuildActivityLog();
 }
 
 function matchesNodeFilters(from, to) {
@@ -940,6 +1008,7 @@ function topicMatchesSubscription(msgTopic, subTopic) {
 }
 
 function clearLog() {
+  messageBuffer.length = 0;
   const log = $('#activity-log');
   if (!log) return;
   log.innerHTML = ACTIVITY_PLACEHOLDER;
@@ -996,13 +1065,7 @@ function handleIncomingMessage(msg) {
   derived.update(event);
 }
 
-function addToLog(direction, data) {
-  const log = $('#activity-log');
-  if (!log) return;
-
-  const placeholder = log.querySelector('.placeholder');
-  if (placeholder) placeholder.remove();
-
+function createLogEntry(direction, data, ts) {
   const entry = document.createElement('div');
   const isIn = direction === 'in';
   entry.dataset.portname = data.portName || (data.raw ? 'raw' : 'sent');
@@ -1011,7 +1074,7 @@ function addToLog(direction, data) {
   if (data.to) entry.dataset.to = data.to;
   entry._messageData = data;
 
-  const time = new Date().toLocaleTimeString();
+  const time = new Date(ts).toLocaleTimeString();
 
   if (isIn && data.from) {
     const statusIcon = data.decryptionStatus === 'success' ? '&#128275;' :
@@ -1019,7 +1082,7 @@ function addToLog(direction, data) {
                        data.decryptionStatus === 'plaintext' ? '&#128221;' :
                        data.decryptionStatus === 'json' ? '&#129534;' : '&#10067;';
 
-    const portConfig = getPortConfig(data.portName, data.payload, data.text);
+    const portConfig = getPortConfig(data.portName, data.payload, data.text, data.from);
 
     entry.className = `text-xs p-2 rounded ${portConfig.bgClass} border-l-2 ${portConfig.borderClass}`;
     entry.innerHTML = `
@@ -1072,10 +1135,59 @@ function addToLog(direction, data) {
     });
   });
 
+  entry.querySelectorAll('[data-show-on-map]').forEach(link => {
+    link.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      navigateToMapNode(link.dataset.showOnMap);
+    });
+  });
+
   entry.addEventListener('click', () => selectLogEntry(entry));
+  return entry;
+}
+
+function addToLog(direction, data) {
+  const log = $('#activity-log');
+  if (!log) return;
+
+  const ts = Date.now();
+  messageBuffer.push({ direction, data, ts });
+  if (messageBuffer.length > MAX_LOG_BUFFER) {
+    messageBuffer.splice(0, messageBuffer.length - MAX_LOG_BUFFER);
+  }
+
+  // Only add to DOM if it matches the current filters
+  if (!entryMatchesFilters(direction, data)) return;
+
+  const placeholder = log.querySelector('.placeholder');
+  if (placeholder) placeholder.remove();
+
+  const entry = createLogEntry(direction, data, ts);
   log.insertBefore(entry, log.firstChild);
-  applyFilter();
-  while (log.children.length > 200) log.removeChild(log.lastChild);
+  while (log.children.length > MAX_LOG_DOM) log.removeChild(log.lastChild);
+}
+
+function rebuildActivityLog() {
+  const log = $('#activity-log');
+  if (!log) return;
+
+  closeDetailPanel();
+  log.innerHTML = '';
+
+  let rendered = 0;
+  // Buffer is oldest-first; iterate newest-first for display order
+  for (let i = messageBuffer.length - 1; i >= 0 && rendered < MAX_LOG_DOM; i--) {
+    const { direction, data, ts } = messageBuffer[i];
+    if (entryMatchesFilters(direction, data)) {
+      log.appendChild(createLogEntry(direction, data, ts));
+      rendered++;
+    }
+  }
+
+  if (rendered === 0) {
+    log.innerHTML = ACTIVITY_PLACEHOLDER;
+  }
 }
 
 // =============== Detail Panel ===============
@@ -1128,11 +1240,23 @@ function renderDetailPanel(data) {
   const hasPosition = data.portName === 'POSITION' && data.payload?.latitude && data.payload?.longitude;
   if (hasPosition) {
     html += `<div class="detail-row"><div class="detail-label">Location</div><div id="detail-map" style="height:200px;width:100%;border-radius:3px;border:1px solid #3c3c3c;margin-top:4px;"></div></div>`;
+    html += `<div class="detail-row" style="display:flex;gap:12px">`;
+    html += `<a href="https://www.google.com/maps?q=${data.payload.latitude},${data.payload.longitude}" target="_blank" style="color:#007acc;font-size:11px"><i class="fas fa-external-link-alt"></i> Google Maps</a>`;
+    if (data.from) html += `<a href="#" data-show-on-map="${escapeHtml(data.from)}" style="color:#007acc;font-size:11px"><i class="fas fa-map-marked-alt"></i> Show on Map</a>`;
+    html += `</div>`;
   }
 
   if (data.payload && typeof data.payload === 'object') html += `<div class="detail-row"><div class="detail-label">Decoded Payload</div><div class="detail-json">${escapeHtml(JSON.stringify(data.payload, null, 2))}</div></div>`;
 
   content.innerHTML = html;
+
+  // Wire "Show on Map" links in detail panel
+  content.querySelectorAll('[data-show-on-map]').forEach(link => {
+    link.addEventListener('click', (e) => {
+      e.preventDefault();
+      navigateToMapNode(link.dataset.showOnMap);
+    });
+  });
 
   // Initialize Leaflet map after DOM insertion
   if (hasPosition && typeof L !== 'undefined') {
@@ -1160,9 +1284,9 @@ function closeDetailPanel() {
 
 // =============== Port Config ===============
 
-function getPortConfig(portName, payload, text) {
+function getPortConfig(portName, payload, text, from) {
   const config = PORT_CONFIGS[portName] || DEFAULT_PORT_CONFIG;
-  const context = { payload, text, portName };
+  const context = { payload, text, portName, from };
   return { ...config, content: typeof config.content === 'function' ? config.content(context) : config.content };
 }
 
@@ -1894,6 +2018,14 @@ function renderNodeDashboard(nodeId) {
       renderNodeDashboard(targetId);
     });
   });
+
+  // Wire "Show on Map" links
+  dashboard.querySelectorAll('[data-show-on-map]').forEach(el => {
+    el.addEventListener('click', (evt) => {
+      evt.preventDefault();
+      navigateToMapNode(el.dataset.showOnMap);
+    });
+  });
 }
 
 function renderIdentityCard(node) {
@@ -1920,7 +2052,10 @@ function renderPositionCard(node) {
   rows += `<div class="detail-row"><div class="detail-label">Longitude</div><div class="detail-value">${pos.lon.toFixed(6)}&deg;</div></div>`;
   if (pos.alt) rows += `<div class="detail-row"><div class="detail-label">Altitude</div><div class="detail-value">${pos.alt}m</div></div>`;
   rows += `<div class="detail-row"><div class="detail-label">Updated</div><div class="detail-value">${formatTimeAgo(pos.ts)}</div></div>`;
-  rows += `<div class="detail-row"><a href="https://www.google.com/maps?q=${pos.lat},${pos.lon}" target="_blank" style="color:#007acc;font-size:11px"><i class="fas fa-external-link-alt"></i> Open in Google Maps</a></div>`;
+  rows += `<div class="detail-row" style="display:flex;gap:12px">`;
+  rows += `<a href="https://www.google.com/maps?q=${pos.lat},${pos.lon}" target="_blank" style="color:#007acc;font-size:11px"><i class="fas fa-external-link-alt"></i> Open in Google Maps</a>`;
+  rows += `<a href="#" class="node-show-on-map" data-show-on-map="${escapeHtml(node.nodeId)}" style="color:#007acc;font-size:11px"><i class="fas fa-map-marked-alt"></i> Show on Map</a>`;
+  rows += `</div>`;
 
   return `<div class="node-card"><div class="node-card-header"><i class="fas fa-map-pin"></i> Position</div><div class="node-card-body">${rows}</div></div>`;
 }
@@ -2017,16 +2152,17 @@ function setupMapView() {
     }
   });
 
-  $('#map-show-gateways')?.addEventListener('change', (e) => {
-    state.mapView.showGatewayLinks = e.target.checked;
-    if (state.mapView.map) {
-      if (state.mapView.showGatewayLinks) {
-        updateGatewayLinks();
-      } else {
-        clearGatewayLinks();
+  const ageSlider = $('#map-link-age');
+  const ageLabel = $('#map-link-age-label');
+  if (ageSlider) {
+    ageSlider.addEventListener('input', (e) => {
+      state.mapView.maxLinkAgeHours = parseInt(e.target.value, 10);
+      if (ageLabel) ageLabel.textContent = `${state.mapView.maxLinkAgeHours}h`;
+      if (state.mapView.map && state.mapView.showLinks) {
+        updateMapLinks();
       }
-    }
-  });
+    });
+  }
 
   $('#map-fit-btn')?.addEventListener('click', () => {
     fitMapBounds();
@@ -2052,6 +2188,31 @@ function initMapView() {
   }).addTo(map);
 
   state.mapView.map = map;
+
+  // Wire popup links via event delegation on the map container
+  container.addEventListener('click', (e) => {
+    const navLink = e.target.closest('[data-nav-to-node]');
+    if (navLink) {
+      e.preventDefault();
+      e.stopPropagation();
+      navigateToNodeDetail(navLink.dataset.navToNode);
+      return;
+    }
+    const filterFrom = e.target.closest('[data-filter-node-from]');
+    if (filterFrom) {
+      e.preventDefault();
+      e.stopPropagation();
+      navigateToActivityFiltered(filterFrom.dataset.filterNodeFrom, 'from');
+      return;
+    }
+    const filterTo = e.target.closest('[data-filter-node-to]');
+    if (filterTo) {
+      e.preventDefault();
+      e.stopPropagation();
+      navigateToActivityFiltered(filterTo.dataset.filterNodeTo, 'to');
+      return;
+    }
+  });
 
   // Disable auto-fit on user interaction
   map.on('dragstart', () => {
@@ -2119,9 +2280,6 @@ function updateMapMarkers() {
   if (state.mapView.showLinks) {
     updateMapLinks();
   }
-  if (state.mapView.showGatewayLinks) {
-    updateGatewayLinks();
-  }
 
   // Auto-fit
   if (state.mapView.autoFit && bounds.length > 0) {
@@ -2137,10 +2295,6 @@ function updateMapMarkers() {
   if (summaryEl) {
     const parts = [`${positionedNodes.length} nodes`];
     if (state.mapView.showLinks) parts.push(`${state.mapView.lines.length} links`);
-    if (state.mapView.showGatewayLinks) {
-      const gwCount = state.mapView.gatewayLines.length;
-      parts.push(`${gwCount} gateway link${gwCount === 1 ? '' : 's'}`);
-    }
     summaryEl.textContent = `Mesh Node Map (${parts.join(', ')})`;
   }
 }
@@ -2194,6 +2348,12 @@ function createNodePopupHtml(node) {
   rows += `<div class="node-popup-row"><span class="node-popup-label">Messages</span><span class="node-popup-value">RX: ${node.messageCountRx} TX: ${node.messageCountTx}</span></div>`;
   if (node.lastGatewayId) rows += `<div class="node-popup-row"><span class="node-popup-label">Gateway</span><span class="node-popup-value">${escapeHtml(node.lastGatewayId)}</span></div>`;
 
+  rows += `<div style="margin-top:6px;padding-top:4px;border-top:1px solid #ddd;display:flex;gap:8px;flex-wrap:wrap">`;
+  rows += `<a href="#" data-nav-to-node="${escapeHtml(node.nodeId)}" style="color:#007acc;font-size:11px;text-decoration:none"><i class="fas fa-info-circle"></i> Details</a>`;
+  rows += `<a href="#" data-filter-node-from="${escapeHtml(node.nodeId)}" style="color:#007acc;font-size:11px;text-decoration:none"><i class="fas fa-filter"></i> Msgs from</a>`;
+  rows += `<a href="#" data-filter-node-to="${escapeHtml(node.nodeId)}" style="color:#007acc;font-size:11px;text-decoration:none"><i class="fas fa-filter"></i> Msgs to</a>`;
+  rows += `</div>`;
+
   return `<div class="node-popup">${nameHtml}${rows}</div>`;
 }
 
@@ -2222,94 +2382,43 @@ function isRenderableMapNodeId(nodeId) {
   return Boolean(nodeId) && nodeId !== '?' && nodeId !== '^all';
 }
 
-function addConnectivityEdge(edgeMap, fromNodeId, toNodeId, { source, packetCount = 1, lastSeenAt = 0, snr = null } = {}) {
-  const from = normalizeMapNodeId(fromNodeId);
-  const to = normalizeMapNodeId(toNodeId);
-  if (!isRenderableMapNodeId(from) || !isRenderableMapNodeId(to) || from === to) return;
+// --- SNR-based link rendering ---
 
-  const [a, b] = from < to ? [from, to] : [to, from];
-  const edgeKey = `${a}|${b}`;
-  let edge = edgeMap.get(edgeKey);
-  if (!edge) {
-    edge = {
-      id: edgeKey,
-      a,
-      b,
-      packetCount: 0,
-      neighborCount: 0,
-      tracerouteCount: 0,
-      snrSum: 0,
-      snrCount: 0,
-      lastSeenAt: 0,
-    };
-    edgeMap.set(edgeKey, edge);
-  }
-
-  if (source === 'neighbor') {
-    edge.neighborCount += 1;
-    if (Number.isFinite(snr)) {
-      edge.snrSum += snr;
-      edge.snrCount += 1;
-    }
-  } else if (source === 'traceroute') {
-    edge.tracerouteCount += 1;
-  } else {
-    edge.packetCount += Math.max(1, packetCount || 1);
-  }
-
-  if (lastSeenAt && lastSeenAt > edge.lastSeenAt) edge.lastSeenAt = lastSeenAt;
+function getSnrColor(snr) {
+  if (snr == null) return '#858585';
+  if (snr >= 5) return '#22c55e';
+  if (snr >= 0) return '#84cc16';
+  if (snr >= -5) return '#eab308';
+  if (snr >= -10) return '#f97316';
+  return '#ef4444';
 }
 
-function collectConnectivityEdges() {
-  const edgeMap = new Map();
-
-  for (const link of Object.values(derived.links)) {
-    addConnectivityEdge(edgeMap, link.fromNodeId, link.toNodeId, {
-      source: 'packet',
-      packetCount: link.packetCount,
-      lastSeenAt: link.lastSeenAt,
-    });
-  }
-
-  for (const node of Object.values(derived.nodes)) {
-    const neighborInfo = node.lastNeighborInfo;
-    if (neighborInfo?.neighbors?.length > 0) {
-      const ts = neighborInfo._ts || node.lastSeenAt || 0;
-      for (const neighbor of neighborInfo.neighbors) {
-        addConnectivityEdge(edgeMap, node.nodeId, neighbor.nodeId, {
-          source: 'neighbor',
-          lastSeenAt: ts,
-          snr: neighbor.snr,
-        });
-      }
-    }
-
-    const traceroute = node.lastTraceroute;
-    if (!traceroute) continue;
-    const ts = traceroute._ts || node.lastSeenAt || 0;
-    const routes = [traceroute.route, traceroute.routeBack].filter(r => Array.isArray(r) && r.length > 0);
-    for (const route of routes) {
-      const routeIds = route.map(normalizeMapNodeId).filter(isRenderableMapNodeId);
-      if (routeIds.length === 0) continue;
-
-      addConnectivityEdge(edgeMap, node.nodeId, routeIds[0], { source: 'traceroute', lastSeenAt: ts });
-      for (let i = 1; i < routeIds.length; i++) {
-        addConnectivityEdge(edgeMap, routeIds[i - 1], routeIds[i], { source: 'traceroute', lastSeenAt: ts });
-      }
-    }
-  }
-
-  return Array.from(edgeMap.values());
+function getLinkOpacity(lastSeenAt) {
+  if (!lastSeenAt) return 0.25;
+  const ageMs = Date.now() - lastSeenAt;
+  if (ageMs < 3600000) return 0.9;          // <1h
+  if (ageMs < 6 * 3600000) return 0.7;      // <6h
+  if (ageMs < 24 * 3600000) return 0.45;    // <24h
+  return 0.25;
 }
 
-function getConnectivityLineStyle(edge) {
-  if (edge.neighborCount > 0) {
-    return { color: '#f59e0b', weight: 2, opacity: 0.75, dashArray: '' };
-  }
-  if (edge.tracerouteCount > 0) {
-    return { color: '#14b8a6', weight: 2, opacity: 0.7, dashArray: '2 6' };
-  }
-  return { color: '#858585', weight: 1.8, opacity: 0.65, dashArray: '4 4' };
+function getLinkWeight(link) {
+  const total = link.directRfCount + link.neighborReportCount + link.tracerouteCount + link.packetCount;
+  return Math.min(1.5 + total * 0.3, 5);
+}
+
+function isDirectEvidence(link) {
+  return link.directRfCount > 0 || link.neighborReportCount > 0;
+}
+
+function avgSnr(samples) {
+  if (!samples || samples.length === 0) return null;
+  return samples.reduce((a, b) => a + b, 0) / samples.length;
+}
+
+function avgRssi(samples) {
+  if (!samples || samples.length === 0) return null;
+  return samples.reduce((a, b) => a + b, 0) / samples.length;
 }
 
 function formatLinkNodeLabel(nodeId) {
@@ -2320,21 +2429,45 @@ function formatLinkNodeLabel(nodeId) {
   return getNodeMapLabel(node);
 }
 
-function buildConnectivityTooltip(edge) {
-  const nameA = formatLinkNodeLabel(edge.a);
-  const nameB = formatLinkNodeLabel(edge.b);
-  const meta = [];
-  if (edge.packetCount > 0) meta.push(`${edge.packetCount} pkt`);
-  if (edge.neighborCount > 0) {
-    if (edge.snrCount > 0) {
-      meta.push(`neighbor avg ${(edge.snrSum / edge.snrCount).toFixed(1)} dB`);
-    } else {
-      meta.push('neighbor link');
-    }
+function buildRfLinkTooltip(link) {
+  const nameA = formatLinkNodeLabel(link.a);
+  const nameB = formatLinkNodeLabel(link.b);
+
+  const isDirect = isDirectEvidence(link);
+  const linkType = isDirect ? 'Direct RF' : 'Inferred';
+
+  const snrAvg = avgSnr(link.snrSamples);
+  const rssiAvg = avgRssi(link.rssiSamples);
+
+  // Distance
+  const nodeA = derived.getNodeStats(link.a);
+  const nodeB = derived.getNodeStats(link.b);
+  let distStr = '';
+  if (nodeA?.lastPosition && nodeB?.lastPosition) {
+    const km = haversineKm(nodeA.lastPosition.lat, nodeA.lastPosition.lon, nodeB.lastPosition.lat, nodeB.lastPosition.lon);
+    distStr = `${km.toFixed(1)} km`;
   }
-  if (edge.tracerouteCount > 0) meta.push('traceroute');
-  if (edge.lastSeenAt) meta.push(formatTimeAgo(edge.lastSeenAt).replace('<', '&lt;'));
-  return `${escapeHtml(nameA)} <-> ${escapeHtml(nameB)}${meta.length ? ` (${meta.join(' | ')})` : ''}`;
+
+  // Direction
+  const dirArrow = (link.aToB > 0 && link.bToA > 0) ? '&harr;' : '&rarr;';
+
+  // Evidence breakdown
+  const evidence = [];
+  if (link.directRfCount > 0) evidence.push(`${link.directRfCount} zero-hop`);
+  if (link.neighborReportCount > 0) evidence.push(`${link.neighborReportCount} neighbor`);
+  if (link.tracerouteCount > 0) evidence.push(`${link.tracerouteCount} traceroute`);
+  if (link.packetCount > 0) evidence.push(`${link.packetCount} pkt`);
+
+  let html = `<b>${escapeHtml(nameA)} ${dirArrow} ${escapeHtml(nameB)}</b><br>`;
+  html += `<span style="opacity:0.8">${linkType}</span>`;
+  if (snrAvg != null) html += ` &middot; SNR: ${snrAvg.toFixed(1)} dB`;
+  if (rssiAvg != null) html += ` &middot; RSSI: ${rssiAvg.toFixed(0)}`;
+  if (distStr) html += ` &middot; ${distStr}`;
+  html += `<br><span style="font-size:10px;opacity:0.7">${evidence.join(', ')}`;
+  if (link.lastSeenAt) html += ` &middot; ${formatTimeAgo(link.lastSeenAt).replace('<', '&lt;')}`;
+  html += '</span>';
+
+  return html;
 }
 
 function updateMapLinks() {
@@ -2343,17 +2476,29 @@ function updateMapLinks() {
 
   clearMapLinks();
 
-  const allEdges = collectConnectivityEdges();
-  for (const edge of allEdges) {
-    const fromNode = derived.getNodeStats(edge.a);
-    const toNode = derived.getNodeStats(edge.b);
-    if (!fromNode?.lastPosition || !toNode?.lastPosition) continue;
+  const now = Date.now();
+  const maxAgeMs = state.mapView.maxLinkAgeHours * 3600000;
+  const allLinks = derived.getRfLinks();
+
+  for (const link of allLinks) {
+    // Filter by age
+    if (link.lastSeenAt && (now - link.lastSeenAt) > maxAgeMs) continue;
+
+    const nodeA = derived.getNodeStats(link.a);
+    const nodeB = derived.getNodeStats(link.b);
+    if (!nodeA?.lastPosition || !nodeB?.lastPosition) continue;
+
+    const snrAvg = avgSnr(link.snrSamples);
+    const color = getSnrColor(snrAvg);
+    const opacity = getLinkOpacity(link.lastSeenAt);
+    const weight = getLinkWeight(link);
+    const dashArray = isDirectEvidence(link) ? '' : '6 4';
 
     const line = L.polyline(
-      [[fromNode.lastPosition.lat, fromNode.lastPosition.lon], [toNode.lastPosition.lat, toNode.lastPosition.lon]],
-      getConnectivityLineStyle(edge)
+      [[nodeA.lastPosition.lat, nodeA.lastPosition.lon], [nodeB.lastPosition.lat, nodeB.lastPosition.lon]],
+      { color, weight, opacity, dashArray }
     );
-    line.bindTooltip(buildConnectivityTooltip(edge), {
+    line.bindTooltip(buildRfLinkTooltip(link), {
       sticky: true,
       className: 'node-map-label',
     });
@@ -2369,75 +2514,6 @@ function clearMapLinks() {
     map.removeLayer(line);
   }
   state.mapView.lines = [];
-}
-
-function updateGatewayLinks() {
-  const map = state.mapView.map;
-  if (!map) return;
-
-  clearGatewayLinks();
-
-  // Gateway links are inferred from observed packets and can become noisy.
-  // Keep only recent + plausible RF distances, and cap links per gateway.
-  const MAX_GATEWAY_LINK_DISTANCE_KM = 80;
-  const MAX_GATEWAY_LINK_AGE_MS = 6 * 60 * 60 * 1000; // 6h
-  const MAX_GATEWAY_LINKS_PER_GATEWAY = 12;
-
-  const now = Date.now();
-  const candidatesByGateway = new Map();
-
-  for (const node of Object.values(derived.nodes)) {
-    if (!node.lastPosition) continue;
-
-    const gwId = node.lastGatewayId;
-    if (!gwId || gwId === node.nodeId) continue;
-
-    if (!node.lastSeenAt || (now - node.lastSeenAt) > MAX_GATEWAY_LINK_AGE_MS) continue;
-
-    const gwNode = derived.getNodeStats(gwId);
-    if (!gwNode?.lastPosition) continue;
-
-    const from = [node.lastPosition.lat, node.lastPosition.lon];
-    const to = [gwNode.lastPosition.lat, gwNode.lastPosition.lon];
-    const distKm = haversineKm(from[0], from[1], to[0], to[1]);
-
-    // Ignore co-located and implausibly long RF spans.
-    if (distKm < 0.1 || distKm > MAX_GATEWAY_LINK_DISTANCE_KM) continue;
-
-    if (!candidatesByGateway.has(gwId)) {
-      candidatesByGateway.set(gwId, []);
-    }
-    candidatesByGateway.get(gwId).push({ node, gwNode, from, to, distKm });
-  }
-
-  for (const candidates of candidatesByGateway.values()) {
-    candidates
-      .sort((a, b) => {
-        if (a.distKm !== b.distKm) return a.distKm - b.distKm;
-        return (b.node.lastSeenAt || 0) - (a.node.lastSeenAt || 0);
-      })
-      .slice(0, MAX_GATEWAY_LINKS_PER_GATEWAY)
-      .forEach(({ node, gwNode, from, to, distKm }) => {
-        const line = L.polyline([from, to], {
-          color: '#007acc', weight: 2, opacity: 0.7, dashArray: '6 4',
-        });
-        line.bindTooltip(`${getNodeMapLabel(node)} via ${getNodeMapLabel(gwNode)} (${distKm.toFixed(1)} km)`, {
-          sticky: true,
-          className: 'node-map-label',
-        });
-        line.addTo(map);
-        state.mapView.gatewayLines.push(line);
-      });
-  }
-}
-
-function clearGatewayLinks() {
-  const map = state.mapView.map;
-  if (!map) return;
-  for (const line of state.mapView.gatewayLines) {
-    map.removeLayer(line);
-  }
-  state.mapView.gatewayLines = [];
 }
 
 function fitMapBounds() {
@@ -2523,6 +2599,48 @@ function updateStatusBarNodeCount() {
   if (!el) return;
   const count = Object.keys(derived.nodes).length;
   el.textContent = `${count} node${count !== 1 ? 's' : ''}`;
+}
+
+// =============== Deep Link Navigation ===============
+
+function navigateToView(viewName) {
+  state.activeView = viewName;
+  state.sidebarCollapsed = false;
+
+  $$('.activity-bar-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.view === viewName);
+  });
+  $('#sidebar').classList.remove('collapsed');
+  $$('.sidebar-view').forEach(v => v.classList.toggle('active', v.id === `sidebar-${viewName}`));
+  $$('.main-view').forEach(v => v.classList.toggle('active', v.id === `main-${viewName}`));
+}
+
+function navigateToNodeDetail(nodeId) {
+  navigateToView('nodes');
+  state.nodesView.selectedNodeId = nodeId;
+  renderNodesList();
+  renderNodeDashboard(nodeId);
+}
+
+function navigateToActivityFiltered(nodeId, field) {
+  navigateToView('watch');
+  clearNodeFilters();
+  addNodeFilter(field, nodeId);
+}
+
+function navigateToMapNode(nodeId) {
+  navigateToView('map');
+  initMapView();
+  setTimeout(() => {
+    if (state.mapView.map) {
+      state.mapView.map.invalidateSize();
+      const marker = state.mapView.markers[nodeId];
+      if (marker) {
+        state.mapView.map.setView(marker.getLatLng(), 14);
+        marker.openPopup();
+      }
+    }
+  }, 100);
 }
 
 // =============== Boot ===============

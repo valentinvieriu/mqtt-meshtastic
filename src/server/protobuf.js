@@ -334,6 +334,8 @@ export function decodeMeshPacket(buffer, options = {}) {
     channel: 0,
     id: 0,
     rxTime: 0,
+    rxSnr: null,
+    rxRssi: null,
     hopLimit: 0,
     wantAck: false,
     encrypted: null,
@@ -373,7 +375,8 @@ export function decodeMeshPacket(buffer, options = {}) {
           result.rxTime = reader.readFixed32();
           break;
         case 8: // rx_snr (float = fixed32)
-          reader.readFixed32();
+          result.rxSnr = reader.buffer.readFloatLE(reader.pos);
+          reader.pos += 4;
           break;
         case 9: // hop_limit (varint)
           result.hopLimit = reader.readVarint();
@@ -384,9 +387,11 @@ export function decodeMeshPacket(buffer, options = {}) {
         case 11: // priority (varint)
           reader.readVarint();
           break;
-        case 12: // rx_rssi (varint, signed)
-          reader.readVarint();
+        case 12: { // rx_rssi (varint, signed)
+          const v = reader.readVarint();
+          result.rxRssi = (v | 0);
           break;
+        }
         case 13: // delayed (varint enum)
           reader.readVarint();
           break;
@@ -874,15 +879,16 @@ function decodeRouteDiscovery(buffer) {
             result.route.push(reader.readFixed32());
           }
           break;
-        case 2: // snr_towards (repeated int8)
+        case 2: // snr_towards (repeated int8, quarter-dB units)
           if (wireType === 2) {
             const len = reader.readVarint();
             const end = reader.pos + len;
             while (reader.pos < end) {
-              result.snrTowards.push(reader.buffer.readInt8(reader.pos++));
+              result.snrTowards.push(reader.buffer.readInt8(reader.pos++) / 4);
             }
           } else {
-            result.snrTowards.push(reader.readVarint());
+            const v = reader.readVarint();
+            result.snrTowards.push(((v << 24) >> 24) / 4);
           }
           break;
         case 3: // route_back (repeated fixed32)
@@ -896,15 +902,16 @@ function decodeRouteDiscovery(buffer) {
             result.routeBack.push(reader.readFixed32());
           }
           break;
-        case 4: // snr_back (repeated int8)
+        case 4: // snr_back (repeated int8, quarter-dB units)
           if (wireType === 2) {
             const len = reader.readVarint();
             const end = reader.pos + len;
             while (reader.pos < end) {
-              result.snrBack.push(reader.buffer.readInt8(reader.pos++));
+              result.snrBack.push(reader.buffer.readInt8(reader.pos++) / 4);
             }
           } else {
-            result.snrBack.push(reader.readVarint());
+            const v = reader.readVarint();
+            result.snrBack.push(((v << 24) >> 24) / 4);
           }
           break;
         default:

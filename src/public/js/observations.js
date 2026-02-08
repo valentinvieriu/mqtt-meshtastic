@@ -1,7 +1,7 @@
 // Observations — append-only normalized event log per MQTT packet
 // In-memory only; not persisted across page refreshes.
 
-const MAX_EVENTS = 2000;
+const MAX_EVENTS = 10000;
 
 const PORT_CLASS_MAP = {
   1: 'Text',
@@ -79,6 +79,8 @@ export class Observations {
       hopStart: msg.hopStart ?? null,
       hopLimit: msg.hopLimit ?? null,
       viaMqtt: msg.viaMqtt ?? null,
+      rxSnr: msg.rxSnr ?? null,
+      rxRssi: msg.rxRssi ?? null,
       text: msg.text || null,
       decodedPayload: msg.payload || null,
       rawBase64: null,
