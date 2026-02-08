@@ -555,7 +555,8 @@ function handleMqttMessage(topic, rawMessage) {
     }
   }
 
-  broadcast(buildRawMessage(topic, rawMessage, classification));
+  const error = classification.decodeError || classification.kind;
+  console.log(`[MQTT] Undecoded ${classification.kind} (${rawMessage.length}B) on ${topic}: ${error}`);
 }
 
 function decodePacketContent(packet, context = {}) {
