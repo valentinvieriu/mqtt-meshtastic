@@ -21,6 +21,10 @@ const state = {
   sidebarCollapsed: false,
   subscriptionVisibility: {},
   selectedMessage: null,
+  // Nodes view state
+  nodesView: { selectedNodeId: null, searchQuery: '', sortBy: 'lastSeenAt' },
+  // Map view state
+  mapView: { map: null, markers: {}, lines: [], gatewayLines: [], autoFit: true, showLinks: true, showGatewayLinks: true, initialized: false },
   // Manage (Settings) view state
   manage: {
     selectedType: null,  // 'network' | 'key' | 'channel' | 'node'
@@ -216,10 +220,6 @@ async function init() {
       catalog.createFromSeed(serverConfig.catalogSeed);
     }
 
-    // Load observations
-    observations.load();
-    derived.rebuildFromObservations(observations.getAll());
-
     // Load UI prefs
     loadUiPrefs();
 
@@ -378,12 +378,34 @@ async function init() {
     renderManageLists();
   });
 
+  // Nodes/Map sidebar controls
+  setupNodesView();
+  setupMapView();
+
   // Initial UI
   updateWatchModeUI();
   updateSendModeUI();
   updateSenderUI();
   generatePreview();
   renderManageLists();
+  updateStatusBarNodeCount();
+
+  // Real-time updates from derived state
+  let derivedUpdateTimer = null;
+  derived.onChange(() => {
+    if (derivedUpdateTimer) return;
+    derivedUpdateTimer = setTimeout(() => {
+      derivedUpdateTimer = null;
+      if (state.activeView === 'nodes') {
+        renderNodesList();
+      }
+      if (state.activeView === 'map') {
+        updateMapMarkers();
+        renderMapNodesList();
+      }
+      updateStatusBarNodeCount();
+    }, 500);
+  });
 }
 
 // =============== UI Prefs ===============
@@ -635,6 +657,16 @@ function setupActivityBar() {
 
       $$('.main-view').forEach(v => v.classList.remove('active'));
       $(`#main-${view}`).classList.add('active');
+
+      // View activation hooks
+      if (view === 'nodes') {
+        renderNodesList();
+      } else if (view === 'map') {
+        initMapView();
+        setTimeout(() => {
+          if (state.mapView.map) state.mapView.map.invalidateSize();
+        }, 100);
+      }
     });
   });
 }
@@ -1718,6 +1750,780 @@ function setupEditorEvents(type, entity, { stateRef, renderList, renderEditor, c
   });
 }
 
+
+// =============== Nodes View ===============
+
+function setupNodesView() {
+  $('#nodes-search')?.addEventListener('input', (e) => {
+    state.nodesView.searchQuery = e.target.value;
+    renderNodesList();
+  });
+
+  ['lastSeenAt', 'name', 'messages'].forEach(sortBy => {
+    $(`#nodes-sort-${sortBy}`)?.addEventListener('click', () => {
+      state.nodesView.sortBy = sortBy;
+      $$('.nodes-sort-btn').forEach(b => b.classList.remove('nodes-sort-active'));
+      $(`#nodes-sort-${sortBy}`).classList.add('nodes-sort-active');
+      renderNodesList();
+    });
+  });
+}
+
+function renderNodesList() {
+  const container = $('#nodes-list');
+  const badge = $('#nodes-count-badge');
+  if (!container) return;
+
+  const allNodes = derived.getAllNodes(state.nodesView.sortBy);
+  const query = state.nodesView.searchQuery.toLowerCase().trim();
+  const filtered = query
+    ? allNodes.filter(n => {
+        const name = (n.lastNodeInfo?.longName || '').toLowerCase();
+        const short = (n.lastNodeInfo?.shortName || '').toLowerCase();
+        const id = n.nodeId.toLowerCase();
+        return name.includes(query) || short.includes(query) || id.includes(query);
+      })
+    : allNodes;
+
+  if (badge) badge.textContent = filtered.length;
+
+  if (filtered.length === 0) {
+    container.innerHTML = `<span class="sidebar-empty" style="padding:8px 12px">${query ? 'No matching nodes' : 'No nodes discovered yet'}</span>`;
+    return;
+  }
+
+  container.innerHTML = filtered.map(node => {
+    const label = derived.getNodeLabel(node.nodeId) || node.nodeId;
+    const shortId = node.nodeId.length > 6 ? node.nodeId.slice(-5) : node.nodeId;
+    const dotClass = getNodeActivityClass(node.lastSeenAt);
+    const timeAgo = node.lastSeenAt ? formatTimeAgo(node.lastSeenAt) : '?';
+    const selected = state.nodesView.selectedNodeId === node.nodeId ? ' node-list-item-selected' : '';
+    return `
+      <div class="node-list-item${selected}" data-node-id="${escapeHtml(node.nodeId)}">
+        <span class="node-list-item-dot ${dotClass}"></span>
+        <div class="node-list-item-info">
+          <span class="node-list-item-name">${escapeHtml(label)}</span>
+          <span class="node-list-item-id">${escapeHtml(shortId)}</span>
+        </div>
+        <span class="node-list-item-time">${timeAgo}</span>
+      </div>
+    `;
+  }).join('');
+
+  container.querySelectorAll('.node-list-item').forEach(el => {
+    el.addEventListener('click', () => {
+      const nodeId = el.dataset.nodeId;
+      state.nodesView.selectedNodeId = nodeId;
+      renderNodesList();
+      renderNodeDashboard(nodeId);
+    });
+  });
+}
+
+function renderNodeDashboard(nodeId) {
+  const dashboard = $('#nodes-dashboard');
+  const titleEl = $('#nodes-dashboard-title');
+  if (!dashboard) return;
+
+  const node = derived.getNodeStats(nodeId);
+  if (!node) {
+    dashboard.innerHTML = '<div class="manage-placeholder"><i class="fas fa-project-diagram"></i><span>Node not found.</span></div>';
+    return;
+  }
+
+  const label = derived.getNodeLabel(nodeId) || nodeId;
+  if (titleEl) titleEl.textContent = label;
+
+  let cards = '';
+
+  // Identity card (always shown)
+  cards += renderIdentityCard(node);
+
+  // Position card
+  if (node.lastPosition) {
+    cards += renderPositionCard(node);
+  }
+
+  // Telemetry card
+  if (node.lastTelemetry) {
+    cards += renderTelemetryCard(node);
+  }
+
+  // Connections card
+  const links = derived.getNodeLinks(nodeId);
+  if (links.length > 0) {
+    cards += renderConnectionsCard(nodeId, links);
+  }
+
+  // RF Neighbors card
+  if (node.lastNeighborInfo?.neighbors?.length > 0) {
+    cards += renderNeighborsCard(node);
+  }
+
+  // Map Report card
+  if (node.lastMapReport) {
+    cards += renderMapReportCard(node);
+  }
+
+  dashboard.innerHTML = `<div class="node-dashboard-grid">${cards}</div>`;
+
+  // Initialize mini map if position card exists
+  const miniMapEl = dashboard.querySelector('#node-mini-map');
+  if (miniMapEl && node.lastPosition && typeof L !== 'undefined') {
+    const lat = node.lastPosition.lat;
+    const lon = node.lastPosition.lon;
+    const miniMap = L.map('node-mini-map', { zoomControl: false, attributionControl: false }).setView([lat, lon], 13);
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(miniMap);
+    L.marker([lat, lon]).addTo(miniMap);
+
+    // Draw position history trail
+    if (node.positionHistory.length > 1) {
+      const trail = node.positionHistory.map(p => [p.lat, p.lon]);
+      L.polyline(trail, { color: '#007acc', weight: 2, opacity: 0.7, dashArray: '4 4' }).addTo(miniMap);
+    }
+
+    setTimeout(() => miniMap.invalidateSize(), 100);
+  }
+
+  // Wire connection row clicks
+  dashboard.querySelectorAll('[data-nav-node-id]').forEach(el => {
+    el.addEventListener('click', () => {
+      const targetId = el.dataset.navNodeId;
+      state.nodesView.selectedNodeId = targetId;
+      renderNodesList();
+      renderNodeDashboard(targetId);
+    });
+  });
+}
+
+function renderIdentityCard(node) {
+  const ni = node.lastNodeInfo;
+  let rows = '';
+  rows += `<div class="detail-row"><div class="detail-label">Node ID</div><div class="detail-value">${escapeHtml(node.nodeId)}</div></div>`;
+  if (ni?.longName) rows += `<div class="detail-row"><div class="detail-label">Long Name</div><div class="detail-value">${escapeHtml(ni.longName)}</div></div>`;
+  if (ni?.shortName) rows += `<div class="detail-row"><div class="detail-label">Short Name</div><div class="detail-value">${escapeHtml(ni.shortName)}</div></div>`;
+  if (ni?.hwModel !== undefined) rows += `<div class="detail-row"><div class="detail-label">Hardware</div><div class="detail-value">${getHwModelName(ni.hwModel)}</div></div>`;
+  if (ni?.role !== undefined) rows += `<div class="detail-row"><div class="detail-label">Role</div><div class="detail-value">${ni.role}</div></div>`;
+  if (node.firstSeenAt) rows += `<div class="detail-row"><div class="detail-label">First Seen</div><div class="detail-value">${new Date(node.firstSeenAt).toLocaleString()}</div></div>`;
+  if (node.lastSeenAt) rows += `<div class="detail-row"><div class="detail-label">Last Seen</div><div class="detail-value">${new Date(node.lastSeenAt).toLocaleString()} (${formatTimeAgo(node.lastSeenAt)})</div></div>`;
+  rows += `<div class="detail-row"><div class="detail-label">Messages</div><div class="detail-value">RX: ${node.messageCountRx} / TX: ${node.messageCountTx}</div></div>`;
+  if (node.lastGatewayId) rows += `<div class="detail-row"><div class="detail-label">Last Gateway</div><div class="detail-value">${escapeHtml(node.lastGatewayId)}</div></div>`;
+
+  return `<div class="node-card"><div class="node-card-header"><i class="fas fa-id-card"></i> Identity</div><div class="node-card-body">${rows}</div></div>`;
+}
+
+function renderPositionCard(node) {
+  const pos = node.lastPosition;
+  let rows = '';
+  rows += `<div id="node-mini-map" style="height:200px;width:100%;border-radius:3px;border:1px solid #3c3c3c;margin-bottom:8px;"></div>`;
+  rows += `<div class="detail-row"><div class="detail-label">Latitude</div><div class="detail-value">${pos.lat.toFixed(6)}&deg;</div></div>`;
+  rows += `<div class="detail-row"><div class="detail-label">Longitude</div><div class="detail-value">${pos.lon.toFixed(6)}&deg;</div></div>`;
+  if (pos.alt) rows += `<div class="detail-row"><div class="detail-label">Altitude</div><div class="detail-value">${pos.alt}m</div></div>`;
+  rows += `<div class="detail-row"><div class="detail-label">Updated</div><div class="detail-value">${formatTimeAgo(pos.ts)}</div></div>`;
+  rows += `<div class="detail-row"><a href="https://www.google.com/maps?q=${pos.lat},${pos.lon}" target="_blank" style="color:#007acc;font-size:11px"><i class="fas fa-external-link-alt"></i> Open in Google Maps</a></div>`;
+
+  return `<div class="node-card"><div class="node-card-header"><i class="fas fa-map-pin"></i> Position</div><div class="node-card-body">${rows}</div></div>`;
+}
+
+function renderTelemetryCard(node) {
+  const t = node.lastTelemetry;
+  let rows = '';
+  if (t.deviceMetrics) {
+    const dm = t.deviceMetrics;
+    if (dm.batteryLevel !== undefined) rows += `<div class="detail-row"><div class="detail-label">Battery</div><div class="detail-value">${dm.batteryLevel}%</div></div>`;
+    if (dm.voltage !== undefined) rows += `<div class="detail-row"><div class="detail-label">Voltage</div><div class="detail-value">${dm.voltage.toFixed(2)}V</div></div>`;
+    if (dm.channelUtilization !== undefined) rows += `<div class="detail-row"><div class="detail-label">Channel Util</div><div class="detail-value">${dm.channelUtilization.toFixed(1)}%</div></div>`;
+    if (dm.airUtilTx !== undefined) rows += `<div class="detail-row"><div class="detail-label">Air Util TX</div><div class="detail-value">${dm.airUtilTx.toFixed(1)}%</div></div>`;
+    if (dm.uptimeSeconds !== undefined) rows += `<div class="detail-row"><div class="detail-label">Uptime</div><div class="detail-value">${formatUptime(dm.uptimeSeconds)}</div></div>`;
+  }
+  if (t.environmentMetrics) {
+    const em = t.environmentMetrics;
+    if (em.temperature !== undefined) rows += `<div class="detail-row"><div class="detail-label">Temperature</div><div class="detail-value">${em.temperature.toFixed(1)}&deg;C</div></div>`;
+    if (em.relativeHumidity !== undefined) rows += `<div class="detail-row"><div class="detail-label">Humidity</div><div class="detail-value">${em.relativeHumidity.toFixed(0)}%</div></div>`;
+    if (em.barometricPressure !== undefined) rows += `<div class="detail-row"><div class="detail-label">Pressure</div><div class="detail-value">${em.barometricPressure.toFixed(0)} hPa</div></div>`;
+  }
+  if (t._ts) rows += `<div class="detail-row"><div class="detail-label">Updated</div><div class="detail-value">${formatTimeAgo(t._ts)}</div></div>`;
+
+  return `<div class="node-card"><div class="node-card-header"><i class="fas fa-chart-bar"></i> Telemetry</div><div class="node-card-body">${rows}</div></div>`;
+}
+
+function renderConnectionsCard(nodeId, links) {
+  const sorted = [...links].sort((a, b) => b.packetCount - a.packetCount);
+  let rows = '';
+  for (const link of sorted) {
+    const isOutbound = link.fromNodeId === nodeId;
+    const otherNodeId = isOutbound ? link.toNodeId : link.fromNodeId;
+    const otherLabel = derived.getNodeLabel(otherNodeId) || otherNodeId;
+    const dirIcon = isOutbound ? '&rarr;' : '&larr;';
+    const timeAgo = link.lastSeenAt ? formatTimeAgo(link.lastSeenAt) : '?';
+    rows += `
+      <div class="node-link-row" data-nav-node-id="${escapeHtml(otherNodeId)}">
+        <span class="node-link-dir">${dirIcon}</span>
+        <span class="node-link-name">${escapeHtml(otherLabel)}</span>
+        <span class="node-link-meta">${link.packetCount} pkts &middot; ${timeAgo}</span>
+      </div>
+    `;
+  }
+  return `<div class="node-card"><div class="node-card-header"><i class="fas fa-exchange-alt"></i> Connections (${links.length})</div><div class="node-card-body" style="padding:4px 0">${rows}</div></div>`;
+}
+
+function renderNeighborsCard(node) {
+  const neighbors = node.lastNeighborInfo.neighbors;
+  let rows = '';
+  for (const n of neighbors) {
+    const nId = typeof n.nodeId === 'number' ? `!${(n.nodeId >>> 0).toString(16).padStart(8, '0')}` : (n.nodeId || '?');
+    const nLabel = derived.getNodeLabel(nId) || nId;
+    const snr = n.snr !== undefined ? `${n.snr.toFixed(1)} dB` : '?';
+    rows += `
+      <div class="node-link-row" data-nav-node-id="${escapeHtml(nId)}">
+        <span class="node-link-dir"><i class="fas fa-signal" style="font-size:9px"></i></span>
+        <span class="node-link-name">${escapeHtml(nLabel)}</span>
+        <span class="node-link-meta">SNR: ${snr}</span>
+      </div>
+    `;
+  }
+  const ts = node.lastNeighborInfo._ts ? `<div class="detail-row" style="padding:4px 12px 0"><div class="detail-label">Updated ${formatTimeAgo(node.lastNeighborInfo._ts)}</div></div>` : '';
+  return `<div class="node-card"><div class="node-card-header"><i class="fas fa-broadcast-tower"></i> RF Neighbors (${neighbors.length})</div><div class="node-card-body" style="padding:4px 0">${rows}${ts}</div></div>`;
+}
+
+function renderMapReportCard(node) {
+  const mr = node.lastMapReport;
+  let rows = '';
+  if (mr.firmwareVersion) rows += `<div class="detail-row"><div class="detail-label">Firmware</div><div class="detail-value">${escapeHtml(mr.firmwareVersion)}</div></div>`;
+  if (mr.region !== undefined) rows += `<div class="detail-row"><div class="detail-label">Region</div><div class="detail-value">${mr.region}</div></div>`;
+  if (mr.modemPreset !== undefined) rows += `<div class="detail-row"><div class="detail-label">Modem Preset</div><div class="detail-value">${mr.modemPreset}</div></div>`;
+  if (mr.numOnlineLocalNodes !== undefined) rows += `<div class="detail-row"><div class="detail-label">Online Local Nodes</div><div class="detail-value">${mr.numOnlineLocalNodes}</div></div>`;
+  if (mr.hasDefaultChannel !== undefined) rows += `<div class="detail-row"><div class="detail-label">Default Channel</div><div class="detail-value">${mr.hasDefaultChannel ? 'Yes' : 'No'}</div></div>`;
+  if (mr._ts) rows += `<div class="detail-row"><div class="detail-label">Updated</div><div class="detail-value">${formatTimeAgo(mr._ts)}</div></div>`;
+
+  return `<div class="node-card"><div class="node-card-header"><i class="fas fa-map"></i> Map Report</div><div class="node-card-body">${rows}</div></div>`;
+}
+
+// =============== Map View ===============
+
+function setupMapView() {
+  $('#map-auto-fit')?.addEventListener('change', (e) => {
+    state.mapView.autoFit = e.target.checked;
+  });
+
+  $('#map-show-links')?.addEventListener('change', (e) => {
+    state.mapView.showLinks = e.target.checked;
+    if (state.mapView.map) {
+      if (state.mapView.showLinks) {
+        updateMapLinks();
+      } else {
+        clearMapLinks();
+      }
+    }
+  });
+
+  $('#map-show-gateways')?.addEventListener('change', (e) => {
+    state.mapView.showGatewayLinks = e.target.checked;
+    if (state.mapView.map) {
+      if (state.mapView.showGatewayLinks) {
+        updateGatewayLinks();
+      } else {
+        clearGatewayLinks();
+      }
+    }
+  });
+
+  $('#map-fit-btn')?.addEventListener('click', () => {
+    fitMapBounds();
+  });
+}
+
+function initMapView() {
+  if (state.mapView.initialized) return;
+  state.mapView.initialized = true;
+
+  const container = $('#map-container');
+  if (!container || typeof L === 'undefined') return;
+
+  const map = L.map(container, {
+    center: [48.5, 10],
+    zoom: 5,
+    zoomControl: true,
+  });
+
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '&copy; <a href="https://openstreetmap.org">OSM</a>',
+  }).addTo(map);
+
+  state.mapView.map = map;
+
+  // Disable auto-fit on user interaction
+  map.on('dragstart', () => {
+    state.mapView.autoFit = false;
+    const cb = $('#map-auto-fit');
+    if (cb) cb.checked = false;
+  });
+
+  // Initial population
+  updateMapMarkers();
+  renderMapNodesList();
+}
+
+function updateMapMarkers() {
+  const map = state.mapView.map;
+  if (!map) return;
+
+  const positionedNodes = derived.getPositionedNodes();
+  const currentIds = new Set(positionedNodes.map(n => n.nodeId));
+
+  // Remove markers for nodes that are gone
+  for (const [id, marker] of Object.entries(state.mapView.markers)) {
+    if (!currentIds.has(id)) {
+      map.removeLayer(marker);
+      delete state.mapView.markers[id];
+    }
+  }
+
+  const bounds = [];
+
+  for (const node of positionedNodes) {
+    const pos = [node.lastPosition.lat, node.lastPosition.lon];
+    bounds.push(pos);
+    const colorClass = getNodeActivityClass(node.lastSeenAt);
+    const markerColorClass = colorClass.replace('dot-', 'node-marker-');
+
+    const displayLabel = getNodeMapLabel(node);
+
+    if (state.mapView.markers[node.nodeId]) {
+      // Update existing marker
+      const marker = state.mapView.markers[node.nodeId];
+      marker.setLatLng(pos);
+      marker.setIcon(createNodeIcon(markerColorClass));
+      marker.setPopupContent(createNodePopupHtml(node));
+      // Update tooltip label if name changed
+      if (marker.getTooltip()) {
+        marker.setTooltipContent(displayLabel);
+      }
+    } else {
+      // Create new marker
+      const marker = L.marker(pos, { icon: createNodeIcon(markerColorClass) });
+      marker.bindPopup(createNodePopupHtml(node), { className: 'node-popup-container' });
+      marker.bindTooltip(displayLabel, {
+        permanent: true,
+        direction: 'right',
+        offset: [8, 0],
+        className: 'node-map-label',
+      });
+      marker.addTo(map);
+      state.mapView.markers[node.nodeId] = marker;
+    }
+  }
+
+  // Update links
+  if (state.mapView.showLinks) {
+    updateMapLinks();
+  }
+  if (state.mapView.showGatewayLinks) {
+    updateGatewayLinks();
+  }
+
+  // Auto-fit
+  if (state.mapView.autoFit && bounds.length > 0) {
+    map.fitBounds(bounds, { padding: [40, 40], maxZoom: 12 });
+    // Disable after first auto-fit
+    state.mapView.autoFit = false;
+    const cb = $('#map-auto-fit');
+    if (cb) cb.checked = false;
+  }
+
+  // Update summary text
+  const summaryEl = $('#map-summary-text');
+  if (summaryEl) {
+    const parts = [`${positionedNodes.length} nodes`];
+    if (state.mapView.showLinks) parts.push(`${state.mapView.lines.length} links`);
+    if (state.mapView.showGatewayLinks) {
+      const gwCount = state.mapView.gatewayLines.length;
+      parts.push(`${gwCount} gateway link${gwCount === 1 ? '' : 's'}`);
+    }
+    summaryEl.textContent = `Mesh Node Map (${parts.join(', ')})`;
+  }
+}
+
+function createNodeIcon(colorClass) {
+  return L.divIcon({
+    className: '',
+    html: `<div class="node-marker ${colorClass}"></div>`,
+    iconSize: [12, 12],
+    iconAnchor: [6, 6],
+    popupAnchor: [0, -8],
+  });
+}
+
+function getNodeMapLabel(node) {
+  const ni = node.lastNodeInfo;
+  if (ni?.shortName) return ni.shortName;
+  if (ni?.longName) return ni.longName;
+  // Fallback to last 4 hex chars of node ID
+  return node.nodeId.length > 4 ? node.nodeId.slice(-4) : node.nodeId;
+}
+
+function createNodePopupHtml(node) {
+  const ni = node.lastNodeInfo;
+  const pos = node.lastPosition;
+
+  // Name header — show long name with short name tag if both exist
+  let nameHtml = '';
+  if (ni?.longName) {
+    nameHtml = `<div class="node-popup-name">${escapeHtml(ni.longName)}`;
+    if (ni.shortName) nameHtml += ` <span class="node-popup-short">${escapeHtml(ni.shortName)}</span>`;
+    nameHtml += '</div>';
+  } else if (ni?.shortName) {
+    nameHtml = `<div class="node-popup-name">${escapeHtml(ni.shortName)}</div>`;
+  } else {
+    nameHtml = `<div class="node-popup-name">${escapeHtml(node.nodeId)}</div>`;
+  }
+
+  let rows = '';
+  rows += `<div class="node-popup-row"><span class="node-popup-label">Node ID</span><span class="node-popup-value">${escapeHtml(node.nodeId)}</span></div>`;
+  if (ni?.hwModel !== undefined) rows += `<div class="node-popup-row"><span class="node-popup-label">Hardware</span><span class="node-popup-value">${getHwModelName(ni.hwModel)}</span></div>`;
+  if (ni?.role !== undefined) rows += `<div class="node-popup-row"><span class="node-popup-label">Role</span><span class="node-popup-value">${ni.role}</span></div>`;
+  if (pos) {
+    rows += `<div class="node-popup-row"><span class="node-popup-label">Position</span><span class="node-popup-value">${pos.lat.toFixed(5)}, ${pos.lon.toFixed(5)}</span></div>`;
+    if (pos.alt) rows += `<div class="node-popup-row"><span class="node-popup-label">Altitude</span><span class="node-popup-value">${pos.alt}m</span></div>`;
+  }
+  if (node.lastTelemetry?.deviceMetrics?.batteryLevel !== undefined) {
+    rows += `<div class="node-popup-row"><span class="node-popup-label">Battery</span><span class="node-popup-value">${node.lastTelemetry.deviceMetrics.batteryLevel}%</span></div>`;
+  }
+  if (node.lastSeenAt) rows += `<div class="node-popup-row"><span class="node-popup-label">Last seen</span><span class="node-popup-value">${formatTimeAgo(node.lastSeenAt)}</span></div>`;
+  rows += `<div class="node-popup-row"><span class="node-popup-label">Messages</span><span class="node-popup-value">RX: ${node.messageCountRx} TX: ${node.messageCountTx}</span></div>`;
+  if (node.lastGatewayId) rows += `<div class="node-popup-row"><span class="node-popup-label">Gateway</span><span class="node-popup-value">${escapeHtml(node.lastGatewayId)}</span></div>`;
+
+  return `<div class="node-popup">${nameHtml}${rows}</div>`;
+}
+
+function normalizeMapNodeId(nodeId) {
+  if (typeof nodeId === 'number' && Number.isFinite(nodeId)) {
+    return `!${(nodeId >>> 0).toString(16).padStart(8, '0')}`;
+  }
+
+  if (typeof nodeId !== 'string') return null;
+  const value = nodeId.trim();
+  if (!value) return null;
+  if (value === '?' || value === '^all') return value;
+  if (value.startsWith('!') && /^[0-9a-fA-F]+$/.test(value.slice(1))) {
+    return `!${value.slice(1).toLowerCase().padStart(8, '0')}`;
+  }
+  if (value.startsWith('0x') && /^[0-9a-fA-F]+$/.test(value.slice(2))) {
+    return `!${(parseInt(value, 16) >>> 0).toString(16).padStart(8, '0')}`;
+  }
+  if (/^\d+$/.test(value)) {
+    return `!${(parseInt(value, 10) >>> 0).toString(16).padStart(8, '0')}`;
+  }
+  return value;
+}
+
+function isRenderableMapNodeId(nodeId) {
+  return Boolean(nodeId) && nodeId !== '?' && nodeId !== '^all';
+}
+
+function addConnectivityEdge(edgeMap, fromNodeId, toNodeId, { source, packetCount = 1, lastSeenAt = 0, snr = null } = {}) {
+  const from = normalizeMapNodeId(fromNodeId);
+  const to = normalizeMapNodeId(toNodeId);
+  if (!isRenderableMapNodeId(from) || !isRenderableMapNodeId(to) || from === to) return;
+
+  const [a, b] = from < to ? [from, to] : [to, from];
+  const edgeKey = `${a}|${b}`;
+  let edge = edgeMap.get(edgeKey);
+  if (!edge) {
+    edge = {
+      id: edgeKey,
+      a,
+      b,
+      packetCount: 0,
+      neighborCount: 0,
+      tracerouteCount: 0,
+      snrSum: 0,
+      snrCount: 0,
+      lastSeenAt: 0,
+    };
+    edgeMap.set(edgeKey, edge);
+  }
+
+  if (source === 'neighbor') {
+    edge.neighborCount += 1;
+    if (Number.isFinite(snr)) {
+      edge.snrSum += snr;
+      edge.snrCount += 1;
+    }
+  } else if (source === 'traceroute') {
+    edge.tracerouteCount += 1;
+  } else {
+    edge.packetCount += Math.max(1, packetCount || 1);
+  }
+
+  if (lastSeenAt && lastSeenAt > edge.lastSeenAt) edge.lastSeenAt = lastSeenAt;
+}
+
+function collectConnectivityEdges() {
+  const edgeMap = new Map();
+
+  for (const link of Object.values(derived.links)) {
+    addConnectivityEdge(edgeMap, link.fromNodeId, link.toNodeId, {
+      source: 'packet',
+      packetCount: link.packetCount,
+      lastSeenAt: link.lastSeenAt,
+    });
+  }
+
+  for (const node of Object.values(derived.nodes)) {
+    const neighborInfo = node.lastNeighborInfo;
+    if (neighborInfo?.neighbors?.length > 0) {
+      const ts = neighborInfo._ts || node.lastSeenAt || 0;
+      for (const neighbor of neighborInfo.neighbors) {
+        addConnectivityEdge(edgeMap, node.nodeId, neighbor.nodeId, {
+          source: 'neighbor',
+          lastSeenAt: ts,
+          snr: neighbor.snr,
+        });
+      }
+    }
+
+    const traceroute = node.lastTraceroute;
+    if (!traceroute) continue;
+    const ts = traceroute._ts || node.lastSeenAt || 0;
+    const routes = [traceroute.route, traceroute.routeBack].filter(r => Array.isArray(r) && r.length > 0);
+    for (const route of routes) {
+      const routeIds = route.map(normalizeMapNodeId).filter(isRenderableMapNodeId);
+      if (routeIds.length === 0) continue;
+
+      addConnectivityEdge(edgeMap, node.nodeId, routeIds[0], { source: 'traceroute', lastSeenAt: ts });
+      for (let i = 1; i < routeIds.length; i++) {
+        addConnectivityEdge(edgeMap, routeIds[i - 1], routeIds[i], { source: 'traceroute', lastSeenAt: ts });
+      }
+    }
+  }
+
+  return Array.from(edgeMap.values());
+}
+
+function getConnectivityLineStyle(edge) {
+  if (edge.neighborCount > 0) {
+    return { color: '#f59e0b', weight: 2, opacity: 0.75, dashArray: '' };
+  }
+  if (edge.tracerouteCount > 0) {
+    return { color: '#14b8a6', weight: 2, opacity: 0.7, dashArray: '2 6' };
+  }
+  return { color: '#858585', weight: 1.8, opacity: 0.65, dashArray: '4 4' };
+}
+
+function formatLinkNodeLabel(nodeId) {
+  const node = derived.getNodeStats(nodeId);
+  if (!node) return nodeId;
+  const label = derived.getNodeLabel(nodeId);
+  if (label) return label;
+  return getNodeMapLabel(node);
+}
+
+function buildConnectivityTooltip(edge) {
+  const nameA = formatLinkNodeLabel(edge.a);
+  const nameB = formatLinkNodeLabel(edge.b);
+  const meta = [];
+  if (edge.packetCount > 0) meta.push(`${edge.packetCount} pkt`);
+  if (edge.neighborCount > 0) {
+    if (edge.snrCount > 0) {
+      meta.push(`neighbor avg ${(edge.snrSum / edge.snrCount).toFixed(1)} dB`);
+    } else {
+      meta.push('neighbor link');
+    }
+  }
+  if (edge.tracerouteCount > 0) meta.push('traceroute');
+  if (edge.lastSeenAt) meta.push(formatTimeAgo(edge.lastSeenAt).replace('<', '&lt;'));
+  return `${escapeHtml(nameA)} <-> ${escapeHtml(nameB)}${meta.length ? ` (${meta.join(' | ')})` : ''}`;
+}
+
+function updateMapLinks() {
+  const map = state.mapView.map;
+  if (!map) return;
+
+  clearMapLinks();
+
+  const allEdges = collectConnectivityEdges();
+  for (const edge of allEdges) {
+    const fromNode = derived.getNodeStats(edge.a);
+    const toNode = derived.getNodeStats(edge.b);
+    if (!fromNode?.lastPosition || !toNode?.lastPosition) continue;
+
+    const line = L.polyline(
+      [[fromNode.lastPosition.lat, fromNode.lastPosition.lon], [toNode.lastPosition.lat, toNode.lastPosition.lon]],
+      getConnectivityLineStyle(edge)
+    );
+    line.bindTooltip(buildConnectivityTooltip(edge), {
+      sticky: true,
+      className: 'node-map-label',
+    });
+    line.addTo(map);
+    state.mapView.lines.push(line);
+  }
+}
+
+function clearMapLinks() {
+  const map = state.mapView.map;
+  if (!map) return;
+  for (const line of state.mapView.lines) {
+    map.removeLayer(line);
+  }
+  state.mapView.lines = [];
+}
+
+function updateGatewayLinks() {
+  const map = state.mapView.map;
+  if (!map) return;
+
+  clearGatewayLinks();
+
+  // Gateway links are inferred from observed packets and can become noisy.
+  // Keep only recent + plausible RF distances, and cap links per gateway.
+  const MAX_GATEWAY_LINK_DISTANCE_KM = 80;
+  const MAX_GATEWAY_LINK_AGE_MS = 6 * 60 * 60 * 1000; // 6h
+  const MAX_GATEWAY_LINKS_PER_GATEWAY = 12;
+
+  const now = Date.now();
+  const candidatesByGateway = new Map();
+
+  for (const node of Object.values(derived.nodes)) {
+    if (!node.lastPosition) continue;
+
+    const gwId = node.lastGatewayId;
+    if (!gwId || gwId === node.nodeId) continue;
+
+    if (!node.lastSeenAt || (now - node.lastSeenAt) > MAX_GATEWAY_LINK_AGE_MS) continue;
+
+    const gwNode = derived.getNodeStats(gwId);
+    if (!gwNode?.lastPosition) continue;
+
+    const from = [node.lastPosition.lat, node.lastPosition.lon];
+    const to = [gwNode.lastPosition.lat, gwNode.lastPosition.lon];
+    const distKm = haversineKm(from[0], from[1], to[0], to[1]);
+
+    // Ignore co-located and implausibly long RF spans.
+    if (distKm < 0.1 || distKm > MAX_GATEWAY_LINK_DISTANCE_KM) continue;
+
+    if (!candidatesByGateway.has(gwId)) {
+      candidatesByGateway.set(gwId, []);
+    }
+    candidatesByGateway.get(gwId).push({ node, gwNode, from, to, distKm });
+  }
+
+  for (const candidates of candidatesByGateway.values()) {
+    candidates
+      .sort((a, b) => {
+        if (a.distKm !== b.distKm) return a.distKm - b.distKm;
+        return (b.node.lastSeenAt || 0) - (a.node.lastSeenAt || 0);
+      })
+      .slice(0, MAX_GATEWAY_LINKS_PER_GATEWAY)
+      .forEach(({ node, gwNode, from, to, distKm }) => {
+        const line = L.polyline([from, to], {
+          color: '#007acc', weight: 2, opacity: 0.7, dashArray: '6 4',
+        });
+        line.bindTooltip(`${getNodeMapLabel(node)} via ${getNodeMapLabel(gwNode)} (${distKm.toFixed(1)} km)`, {
+          sticky: true,
+          className: 'node-map-label',
+        });
+        line.addTo(map);
+        state.mapView.gatewayLines.push(line);
+      });
+  }
+}
+
+function clearGatewayLinks() {
+  const map = state.mapView.map;
+  if (!map) return;
+  for (const line of state.mapView.gatewayLines) {
+    map.removeLayer(line);
+  }
+  state.mapView.gatewayLines = [];
+}
+
+function fitMapBounds() {
+  const map = state.mapView.map;
+  if (!map) return;
+  const positionedNodes = derived.getPositionedNodes();
+  if (positionedNodes.length === 0) return;
+  const bounds = positionedNodes.map(n => [n.lastPosition.lat, n.lastPosition.lon]);
+  map.fitBounds(bounds, { padding: [40, 40], maxZoom: 12 });
+}
+
+function renderMapNodesList() {
+  const container = $('#map-nodes-list');
+  const badge = $('#map-nodes-count-badge');
+  if (!container) return;
+
+  const positioned = derived.getPositionedNodes().sort((a, b) => (b.lastSeenAt || 0) - (a.lastSeenAt || 0));
+  if (badge) badge.textContent = positioned.length;
+
+  if (positioned.length === 0) {
+    container.innerHTML = '<span class="sidebar-empty" style="padding:8px 12px">No positioned nodes</span>';
+    return;
+  }
+
+  container.innerHTML = positioned.map(node => {
+    const label = derived.getNodeLabel(node.nodeId) || node.nodeId;
+    const shortId = node.nodeId.length > 6 ? node.nodeId.slice(-5) : node.nodeId;
+    const dotClass = getNodeActivityClass(node.lastSeenAt);
+    return `
+      <div class="node-list-item" data-map-node-id="${escapeHtml(node.nodeId)}">
+        <span class="node-list-item-dot ${dotClass}"></span>
+        <div class="node-list-item-info">
+          <span class="node-list-item-name">${escapeHtml(label)}</span>
+          <span class="node-list-item-id">${escapeHtml(shortId)}</span>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  container.querySelectorAll('[data-map-node-id]').forEach(el => {
+    el.addEventListener('click', () => {
+      const nodeId = el.dataset.mapNodeId;
+      const marker = state.mapView.markers[nodeId];
+      if (marker && state.mapView.map) {
+        state.mapView.map.setView(marker.getLatLng(), 14);
+        marker.openPopup();
+      }
+    });
+  });
+}
+
+// =============== Shared Helpers ===============
+
+function getNodeActivityClass(lastSeenAt) {
+  if (!lastSeenAt) return 'dot-stale';
+  const age = Date.now() - lastSeenAt;
+  if (age < 3600000) return 'dot-active';       // <1h
+  if (age < 86400000) return 'dot-recent';       // <24h
+  return 'dot-stale';
+}
+
+function formatTimeAgo(ts) {
+  if (!ts) return '?';
+  const diff = Date.now() - ts;
+  if (diff < 60000) return '<1m';
+  if (diff < 3600000) return `${Math.floor(diff / 60000)}m`;
+  if (diff < 86400000) return `${Math.floor(diff / 3600000)}h`;
+  return `${Math.floor(diff / 86400000)}d`;
+}
+
+function haversineKm(lat1, lon1, lat2, lon2) {
+  const R = 6371;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function updateStatusBarNodeCount() {
+  const el = $('#statusbar-nodes-text');
+  if (!el) return;
+  const count = Object.keys(derived.nodes).length;
+  el.textContent = `${count} node${count !== 1 ? 's' : ''}`;
+}
 
 // =============== Boot ===============
 

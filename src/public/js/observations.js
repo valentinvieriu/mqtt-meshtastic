@@ -1,9 +1,7 @@
 // Observations — append-only normalized event log per MQTT packet
-// Stored in localStorage as a ring buffer (max 2000 events)
+// In-memory only; not persisted across page refreshes.
 
-const STORAGE_KEY = 'mqttMeshtastic.observations.v1';
 const MAX_EVENTS = 2000;
-const SAVE_DEBOUNCE_MS = 5000;
 
 const PORT_CLASS_MAP = {
   1: 'Text',
@@ -27,49 +25,23 @@ function getPortClass(portnum) {
   return PORT_CLASS_MAP[portnum] || 'Other';
 }
 
+function extractGatewayIdFromTopic(topic) {
+  if (typeof topic !== 'string') return null;
+  const parts = topic.split('/').filter(Boolean);
+  if (parts.length === 0) return null;
+  const gatewayId = parts[parts.length - 1];
+  if (!gatewayId || gatewayId === '#' || gatewayId === '+') return null;
+  return gatewayId;
+}
+
 export class Observations {
   constructor() {
     this.events = [];
-    this._saveTimer = null;
-    this._dirty = false;
-
-    // Save on page unload
-    window.addEventListener('beforeunload', () => this._saveNow());
   }
 
   load() {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) {
-          this.events = parsed.slice(-MAX_EVENTS);
-          return true;
-        }
-      }
-    } catch (e) {
-      console.warn('[Observations] Failed to load:', e);
-    }
+    // No-op: observations are not persisted
     return false;
-  }
-
-  _saveNow() {
-    if (!this._dirty) return;
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(this.events));
-      this._dirty = false;
-    } catch (e) {
-      console.warn('[Observations] Failed to save:', e);
-    }
-  }
-
-  _scheduleSave() {
-    this._dirty = true;
-    if (this._saveTimer) return;
-    this._saveTimer = setTimeout(() => {
-      this._saveTimer = null;
-      this._saveNow();
-    }, SAVE_DEBOUNCE_MS);
   }
 
   append(event) {
@@ -87,7 +59,6 @@ export class Observations {
       this.events = this.events.slice(-MAX_EVENTS);
     }
 
-    this._scheduleSave();
     return obs;
   }
 
@@ -115,12 +86,13 @@ export class Observations {
   }
 
   static normalizeTxEvent(msg, { networkId = null, channelId = null } = {}) {
+    const topicGatewayId = extractGatewayIdFromTopic(msg.topic);
     return {
       direction: 'tx',
       topic: msg.topic || null,
       networkId,
       channelId,
-      gatewayId: null,
+      gatewayId: msg.gatewayId || topicGatewayId || null,
       fromNodeId: msg.from || null,
       toNodeId: msg.to || null,
       packetId: msg.packetId || null,
@@ -142,8 +114,6 @@ export class Observations {
 
   clear() {
     this.events = [];
-    this._dirty = true;
-    this._saveNow();
   }
 
   get length() {

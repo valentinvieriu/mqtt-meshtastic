@@ -33,6 +33,12 @@
       <button class="activity-bar-btn" data-view="send" title="Send Message">
         <i class="fas fa-paper-plane"></i>
       </button>
+      <button class="activity-bar-btn" data-view="nodes" title="Nodes">
+        <i class="fas fa-project-diagram"></i>
+      </button>
+      <button class="activity-bar-btn" data-view="map" title="Map">
+        <i class="fas fa-map-marked-alt"></i>
+      </button>
       <button class="activity-bar-btn" data-view="manage" title="Settings" style="margin-top:auto;margin-bottom:4px">
         <i class="fas fa-cog"></i>
       </button>
@@ -220,6 +226,90 @@
         </div>
       </div>
 
+      <!-- ===== Nodes Sidebar ===== -->
+      <div class="sidebar-view" id="sidebar-nodes">
+        <div class="sidebar-header">NODES</div>
+
+        <div class="sidebar-section">
+          <div class="sidebar-section-body" style="padding-top:8px">
+            <input type="text" id="nodes-search" class="sidebar-input" placeholder="Search nodes...">
+            <div class="nodes-sort-bar">
+              <button class="nodes-sort-btn nodes-sort-active" id="nodes-sort-lastSeenAt" title="Sort by last seen">Recent</button>
+              <button class="nodes-sort-btn" id="nodes-sort-name" title="Sort by name">Name</button>
+              <button class="nodes-sort-btn" id="nodes-sort-messages" title="Sort by message count">Messages</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="sidebar-section">
+          <button class="sidebar-section-header" data-collapse="nodes-discovered-body">
+            <i class="fas fa-chevron-down sidebar-chevron"></i>
+            <span>DISCOVERED</span>
+            <span id="nodes-count-badge" class="entity-count">0</span>
+          </button>
+          <div class="sidebar-section-body" id="nodes-discovered-body" style="padding:0">
+            <div id="nodes-list" class="nodes-list">
+              <span class="sidebar-empty" style="padding:8px 12px">No nodes discovered yet</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== Map Sidebar ===== -->
+      <div class="sidebar-view" id="sidebar-map">
+        <div class="sidebar-header">MAP</div>
+
+        <div class="sidebar-section">
+          <button class="sidebar-section-header" data-collapse="map-options-body">
+            <i class="fas fa-chevron-down sidebar-chevron"></i>
+            <span>OPTIONS</span>
+          </button>
+          <div class="sidebar-section-body" id="map-options-body">
+            <div class="manage-form-field">
+              <label class="manage-checkbox-label"><input type="checkbox" id="map-auto-fit" checked> Auto-fit bounds</label>
+            </div>
+            <div class="manage-form-field">
+              <label class="manage-checkbox-label"><input type="checkbox" id="map-show-links" checked> Show connections</label>
+            </div>
+            <div class="manage-form-field">
+              <label class="manage-checkbox-label"><input type="checkbox" id="map-show-gateways" checked> Show gateway links</label>
+            </div>
+            <button id="map-fit-btn" class="sidebar-btn sidebar-btn-primary" style="margin-top:4px">
+              <i class="fas fa-expand-arrows-alt"></i> Fit All Nodes
+            </button>
+          </div>
+        </div>
+
+        <div class="sidebar-section">
+          <button class="sidebar-section-header" data-collapse="map-legend-body">
+            <i class="fas fa-chevron-down sidebar-chevron"></i>
+            <span>LEGEND</span>
+          </button>
+          <div class="sidebar-section-body" id="map-legend-body">
+            <div class="map-legend-item"><span class="map-legend-dot map-legend-active"></span> Active (&lt;1h)</div>
+            <div class="map-legend-item"><span class="map-legend-dot map-legend-recent"></span> Recent (&lt;24h)</div>
+            <div class="map-legend-item"><span class="map-legend-dot map-legend-stale"></span> Stale (&gt;24h)</div>
+            <div class="map-legend-item"><span class="map-legend-line map-legend-line-gray"></span> Packet link</div>
+            <div class="map-legend-item"><span class="map-legend-line map-legend-line-amber"></span> RF neighbor link</div>
+            <div class="map-legend-item"><span class="map-legend-line map-legend-line-teal"></span> Traceroute link</div>
+            <div class="map-legend-item"><span class="map-legend-line map-legend-line-blue"></span> Gateway link</div>
+          </div>
+        </div>
+
+        <div class="sidebar-section" style="flex:1;min-height:0;display:flex;flex-direction:column">
+          <button class="sidebar-section-header" data-collapse="map-nodes-body">
+            <i class="fas fa-chevron-down sidebar-chevron"></i>
+            <span>NODES ON MAP</span>
+            <span id="map-nodes-count-badge" class="entity-count">0</span>
+          </button>
+          <div class="sidebar-section-body" id="map-nodes-body" style="padding:0;flex:1;overflow-y:auto">
+            <div id="map-nodes-list" class="nodes-list">
+              <span class="sidebar-empty" style="padding:8px 12px">No positioned nodes</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- ===== Settings Sidebar (formerly Manage) ===== -->
       <div class="sidebar-view" id="sidebar-manage">
         <div class="sidebar-header">SETTINGS</div>
@@ -322,6 +412,31 @@
         </div>
       </div>
 
+      <!-- Nodes Main: Dashboard -->
+      <div class="main-view" id="main-nodes">
+        <div class="tab-bar">
+          <div class="tab-bar-tabs">
+            <span class="tab-bar-label"><i class="fas fa-project-diagram"></i> <span id="nodes-dashboard-title">Node Dashboard</span></span>
+          </div>
+        </div>
+        <div id="nodes-dashboard" class="nodes-dashboard">
+          <div class="manage-placeholder">
+            <i class="fas fa-project-diagram"></i>
+            <span>Select a node from the sidebar to view its dashboard.</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Map Main -->
+      <div class="main-view" id="main-map">
+        <div class="tab-bar">
+          <div class="tab-bar-tabs">
+            <span class="tab-bar-label"><i class="fas fa-map-marked-alt"></i> <span id="map-summary-text">Mesh Node Map</span></span>
+          </div>
+        </div>
+        <div id="map-container" style="flex:1;min-height:0"></div>
+      </div>
+
       <!-- Settings Main: List + Editor -->
       <div class="main-view" id="main-manage">
         <div class="settings-layout">
@@ -366,6 +481,9 @@
       </div>
     </div>
     <div class="statusbar-right">
+      <div class="statusbar-item">
+        <i class="fas fa-microchip"></i> <span id="statusbar-nodes-text">0 nodes</span>
+      </div>
       <div class="statusbar-item">
         <i class="fas fa-globe-americas"></i> <span id="statusbar-region-text">EU_868</span>
       </div>
