@@ -6,6 +6,7 @@ import { config, buildCatalogSeed } from './config.js';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const PUBLIC_DIR = join(__dirname, '../public');
+const SHARED_DIR = join(__dirname, '../shared');
 
 const MIME_TYPES = {
   '.html': 'text/html',
@@ -47,10 +48,13 @@ export function createHttpServer() {
       return;
     }
 
+    const isSharedRequest = req.url?.startsWith('/shared/');
     const url = req.url === '/' ? '/index.html' : req.url;
-    const filePath = join(PUBLIC_DIR, url);
+    const baseDir = isSharedRequest ? SHARED_DIR : PUBLIC_DIR;
+    const relativeUrl = isSharedRequest ? url.replace('/shared', '') : url;
+    const filePath = join(baseDir, relativeUrl);
 
-    if (!filePath.startsWith(PUBLIC_DIR)) {
+    if (!filePath.startsWith(baseDir)) {
       res.writeHead(403);
       res.end('Forbidden');
       return;
