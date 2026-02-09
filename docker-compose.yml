@@ -1,0 +1,18 @@
+services:
+  mqtt-meshtastic:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ghcr.io/valentinvieriu/mqtt-meshtastic:latest
+    container_name: mqtt-meshtastic
+    env_file:
+      - .env
+    ports:
+      - "3000:3000"
+      - "8080:8080"
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
