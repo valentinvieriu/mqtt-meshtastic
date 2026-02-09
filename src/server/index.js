@@ -523,6 +523,7 @@ function handleMqttMessage(topic, rawMessage) {
         portnum,
         decryptionStatus,
         decodedPayload,
+        decodeError,
       } = decodePacketContent(packet, { channelId: resolvedChannelId });
 
       // Broadcast to WebSocket clients
@@ -545,6 +546,7 @@ function handleMqttMessage(topic, rawMessage) {
         text: decodedText,
         payload: decodedPayload,
         decryptionStatus,
+        decodeError,
         timestamp: Date.now(),
       });
       return;
@@ -572,6 +574,7 @@ function decodePacketContent(packet, context = {}) {
     portnum: UNKNOWN_PORTNUM,
     decryptionStatus: 'none',
     decodedPayload: null,
+    decodeError: null,
   };
 }
 
@@ -599,11 +602,14 @@ function decodeEncryptedPacket(packet, context = {}) {
         console.log(`[MQTT] ${formatNodeId(packet.from)} → ${formatNodeId(packet.to)}: "${decodedText}"`);
       }
 
+      const { payload: decodedPayload, decodeError } = decodePayloadByType(data.portnum, data.payload);
+
       return {
         decodedText,
         portnum: data.portnum,
         decryptionStatus: 'success',
-        decodedPayload: decodePayloadByType(data.portnum, data.payload),
+        decodedPayload,
+        decodeError,
       };
     } catch {
       // Try next configured key candidate
@@ -624,11 +630,14 @@ function decodeEncryptedPacket(packet, context = {}) {
         console.log(`[MQTT] ${formatNodeId(packet.from)} → ${formatNodeId(packet.to)}: "${decodedText}" (plaintext in encrypted field)`);
       }
 
+      const { payload: decodedPayload, decodeError } = decodePayloadByType(data.portnum, data.payload);
+
       return {
         decodedText,
         portnum: data.portnum,
         decryptionStatus: 'plaintext',
-        decodedPayload: decodePayloadByType(data.portnum, data.payload),
+        decodedPayload,
+        decodeError,
       };
     }
   } catch {
@@ -641,6 +650,7 @@ function decodeEncryptedPacket(packet, context = {}) {
     portnum: UNKNOWN_PORTNUM,
     decryptionStatus: 'failed',
     decodedPayload: null,
+    decodeError: null,
   };
 }
 
@@ -709,11 +719,14 @@ function decodePlaintextPacket(packet) {
     `[MQTT] ${formatNodeId(packet.from)} → ${formatNodeId(packet.to)} [${getPortName(portnum)}] (plaintext)`
   );
 
+  const { payload: decodedPayload, decodeError } = decodePayloadByType(portnum, payload);
+
   return {
     decodedText,
     portnum,
     decryptionStatus: 'plaintext',
-    decodedPayload: decodePayloadByType(portnum, payload),
+    decodedPayload,
+    decodeError,
   };
 }
 
@@ -724,12 +737,26 @@ function getPortName(portnum) {
 
 // Decode payload based on message type
 function decodePayloadByType(portnum, payload) {
+  const decoder = PORT_PAYLOAD_DECODERS[portnum];
+  if (!decoder) {
+    return { payload: null, decodeError: null };
+  }
+
   try {
-    const decoder = PORT_PAYLOAD_DECODERS[portnum];
-    return decoder ? decoder(payload) : null;
+    const decoded = decoder(payload);
+    if (decoded?._decodeError) {
+      return {
+        payload: decoded,
+        decodeError: `${getPortName(portnum)} field ${decoded._decodeError.fieldNumber}: ${decoded._decodeError.message}`,
+      };
+    }
+    return { payload: decoded, decodeError: null };
   } catch (err) {
     console.error(`[MQTT] Failed to decode portnum ${portnum}:`, err.message);
-    return null;
+    return {
+      payload: null,
+      decodeError: `${getPortName(portnum)} decode error: ${err.message}`,
+    };
   }
 }
 

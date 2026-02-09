@@ -1051,6 +1051,7 @@ function handleIncomingMessage(msg) {
     packetId: msg.packetId, payload: msg.payload,
     hopLimit: msg.hopLimit, hopStart: msg.hopStart, viaMqtt: msg.viaMqtt,
     topic: msg.topic, gatewayId: msg.gatewayId, timestamp: msg.timestamp,
+    decodeError: msg.decodeError || null,
   });
 
   // Record observation — resolve channel from message
@@ -1223,6 +1224,9 @@ function renderDetailPanel(data) {
     if (data.decodeError) html += `<div class="detail-row"><div class="detail-label">Decode Note</div><div class="detail-value" style="color:#f44747">${escapeHtml(data.decodeError)}</div></div>`;
     if (data.previewText) html += `<div class="detail-row"><div class="detail-label">Preview</div><div class="detail-value">${escapeHtml(data.previewText)}</div></div>`;
     if (data.payloadHex) html += `<div class="detail-row"><div class="detail-label">Payload Hex</div><div class="detail-value" style="font-size:10px;word-break:break-all">${escapeHtml(data.payloadHex)}</div></div>`;
+  }
+  if (!data.raw && data.decodeError) {
+    html += `<div class="detail-row"><div class="detail-label">Decode Note</div><div class="detail-value" style="color:#f44747">${escapeHtml(data.decodeError)}</div></div>`;
   }
 
   if (data.portName) html += `<div class="detail-row"><div class="detail-label">Port</div><div class="detail-value">${escapeHtml(data.portName)} (${data.portnum ?? '?'})</div></div>`;

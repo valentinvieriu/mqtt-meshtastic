@@ -169,6 +169,23 @@ class ProtoReader {
   }
 }
 
+function recordDecodeError(result, fieldNumber, error) {
+  if (result._decodeError) return;
+  result._decodeError = {
+    fieldNumber,
+    message: error?.message || String(error),
+  };
+}
+
+function propagateChildDecodeError(result, fieldNumber, childResult, label) {
+  if (!childResult?._decodeError || result._decodeError) return;
+  const { message } = childResult._decodeError;
+  result._decodeError = {
+    fieldNumber,
+    message: label ? `${label}: ${message}` : message,
+  };
+}
+
 // --- Data message (portnum + payload) ---
 // message Data {
 //   PortNum portnum = 1;
@@ -592,6 +609,7 @@ export function decodePosition(buffer) {
           reader.skipField(wireType);
       }
     } catch (e) {
+      recordDecodeError(result, fieldNumber, e);
       break;
     }
   }
@@ -652,6 +670,7 @@ export function decodeUser(buffer) {
           reader.skipField(wireType);
       }
     } catch (e) {
+      recordDecodeError(result, fieldNumber, e);
       break;
     }
   }
@@ -689,15 +708,18 @@ export function decodeTelemetry(buffer) {
         case 2: // device_metrics
           const dmLen = reader.readVarint();
           result.deviceMetrics = decodeDeviceMetrics(reader.readBytes(dmLen));
+          propagateChildDecodeError(result, fieldNumber, result.deviceMetrics, 'device_metrics');
           break;
         case 3: // environment_metrics
           const emLen = reader.readVarint();
           result.environmentMetrics = decodeEnvironmentMetrics(reader.readBytes(emLen));
+          propagateChildDecodeError(result, fieldNumber, result.environmentMetrics, 'environment_metrics');
           break;
         default:
           reader.skipField(wireType);
       }
     } catch (e) {
+      recordDecodeError(result, fieldNumber, e);
       break;
     }
   }
@@ -744,6 +766,7 @@ function decodeDeviceMetrics(buffer) {
           reader.skipField(wireType);
       }
     } catch (e) {
+      recordDecodeError(result, fieldNumber, e);
       break;
     }
   }
@@ -787,6 +810,7 @@ function decodeEnvironmentMetrics(buffer) {
           reader.skipField(wireType);
       }
     } catch (e) {
+      recordDecodeError(result, fieldNumber, e);
       break;
     }
   }
@@ -836,10 +860,12 @@ export function decodeRouting(buffer) {
         case 1: // route_request
           const rrLen = reader.readVarint();
           result.routeRequest = decodeRouteDiscovery(reader.readBytes(rrLen));
+          propagateChildDecodeError(result, fieldNumber, result.routeRequest, 'route_request');
           break;
         case 2: // route_reply
           const rpLen = reader.readVarint();
           result.routeReply = decodeRouteDiscovery(reader.readBytes(rpLen));
+          propagateChildDecodeError(result, fieldNumber, result.routeReply, 'route_reply');
           break;
         case 3: // error_reason
           result.errorReason = reader.readVarint();
@@ -849,6 +875,7 @@ export function decodeRouting(buffer) {
           reader.skipField(wireType);
       }
     } catch (e) {
+      recordDecodeError(result, fieldNumber, e);
       break;
     }
   }
@@ -923,6 +950,7 @@ function decodeRouteDiscovery(buffer) {
           reader.skipField(wireType);
       }
     } catch (e) {
+      recordDecodeError(result, fieldNumber, e);
       break;
     }
   }
@@ -958,12 +986,15 @@ export function decodeNeighborInfo(buffer) {
           break;
         case 4: // neighbors (repeated Neighbor)
           const nLen = reader.readVarint();
-          result.neighbors.push(decodeNeighbor(reader.readBytes(nLen)));
+          const neighbor = decodeNeighbor(reader.readBytes(nLen));
+          result.neighbors.push(neighbor);
+          propagateChildDecodeError(result, fieldNumber, neighbor, 'neighbor');
           break;
         default:
           reader.skipField(wireType);
       }
     } catch (e) {
+      recordDecodeError(result, fieldNumber, e);
       break;
     }
   }
@@ -996,6 +1027,7 @@ function decodeNeighbor(buffer) {
           reader.skipField(wireType);
       }
     } catch (e) {
+      recordDecodeError(result, fieldNumber, e);
       break;
     }
   }
@@ -1083,6 +1115,7 @@ export function decodeMapReport(buffer) {
           reader.skipField(wireType);
       }
     } catch (e) {
+      recordDecodeError(result, fieldNumber, e);
       break;
     }
   }
