@@ -1749,6 +1749,13 @@ input[type="checkbox"] {
 .node-marker-recent { background: #cca700; }
 .node-marker-stale  { background: #585858; }
 
+.node-marker-saved {
+  background: #569cd6;
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255, 255, 255, 0.9);
+}
+
 /* Node popups */
 .node-popup {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -1820,6 +1827,7 @@ input[type="checkbox"] {
 .map-legend-active { background: #89d185; }
 .map-legend-recent { background: #cca700; }
 .map-legend-stale  { background: #585858; }
+.map-legend-saved  { background: #569cd6; border: 1.5px solid rgba(255, 255, 255, 0.9); }
 
 .map-legend-line {
   width: 20px;

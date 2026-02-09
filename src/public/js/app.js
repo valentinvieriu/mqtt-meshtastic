@@ -2247,7 +2247,10 @@ function updateMapMarkers() {
     const pos = [node.lastPosition.lat, node.lastPosition.lon];
     bounds.push(pos);
     const colorClass = getNodeActivityClass(node.lastSeenAt);
-    const markerColorClass = colorClass.replace('dot-', 'node-marker-');
+    const isSaved = !!catalog.findNodeByNodeId(node.nodeId);
+    const markerColorClass = isSaved
+      ? 'node-marker-saved'
+      : colorClass.replace('dot-', 'node-marker-');
 
     const displayLabel = getNodeMapLabel(node);
 
@@ -2255,7 +2258,7 @@ function updateMapMarkers() {
       // Update existing marker
       const marker = state.mapView.markers[node.nodeId];
       marker.setLatLng(pos);
-      marker.setIcon(createNodeIcon(markerColorClass));
+      marker.setIcon(createNodeIcon(markerColorClass, isSaved));
       marker.setPopupContent(createNodePopupHtml(node));
       // Update tooltip label if name changed
       if (marker.getTooltip()) {
@@ -2263,7 +2266,7 @@ function updateMapMarkers() {
       }
     } else {
       // Create new marker
-      const marker = L.marker(pos, { icon: createNodeIcon(markerColorClass) });
+      const marker = L.marker(pos, { icon: createNodeIcon(markerColorClass, isSaved) });
       marker.bindPopup(createNodePopupHtml(node), { className: 'node-popup-container' });
       marker.bindTooltip(displayLabel, {
         permanent: true,
@@ -2299,12 +2302,14 @@ function updateMapMarkers() {
   }
 }
 
-function createNodeIcon(colorClass) {
+function createNodeIcon(colorClass, isSaved) {
+  const size = isSaved ? 14 : 12;
+  const anchor = size / 2;
   return L.divIcon({
     className: '',
     html: `<div class="node-marker ${colorClass}"></div>`,
-    iconSize: [12, 12],
-    iconAnchor: [6, 6],
+    iconSize: [size, size],
+    iconAnchor: [anchor, anchor],
     popupAnchor: [0, -8],
   });
 }
@@ -2542,11 +2547,13 @@ function renderMapNodesList() {
     const label = derived.getNodeLabel(node.nodeId) || node.nodeId;
     const shortId = node.nodeId.length > 6 ? node.nodeId.slice(-5) : node.nodeId;
     const dotClass = getNodeActivityClass(node.lastSeenAt);
+    const isSaved = !!catalog.findNodeByNodeId(node.nodeId);
+    const savedIcon = isSaved ? '<i class="fas fa-star" style="color:#569cd6;font-size:9px;margin-left:4px"></i>' : '';
     return `
       <div class="node-list-item" data-map-node-id="${escapeHtml(node.nodeId)}">
         <span class="node-list-item-dot ${dotClass}"></span>
         <div class="node-list-item-info">
-          <span class="node-list-item-name">${escapeHtml(label)}</span>
+          <span class="node-list-item-name">${escapeHtml(label)}${savedIcon}</span>
           <span class="node-list-item-id">${escapeHtml(shortId)}</span>
         </div>
       </div>
