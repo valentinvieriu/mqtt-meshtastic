@@ -55,9 +55,6 @@ export class WsClient {
         this.#handlers.onPublished?.(msg);
         break;
 
-      case 'decrypted':
-        this.#handlers.onDecrypted?.(msg);
-        break;
 
       case 'subscribed':
         this.#handlers.onSubscribed?.(msg);
@@ -101,16 +98,6 @@ export class WsClient {
       from,
       to,
       text,
-      key,
-    });
-  }
-
-  decrypt({ payload, packetId, fromNode, key }) {
-    return this.send({
-      type: 'decrypt',
-      payload,
-      packetId,
-      fromNode,
       key,
     });
   }
