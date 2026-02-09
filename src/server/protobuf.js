@@ -1,6 +1,8 @@
 // Minimal protobuf encoder/decoder for Meshtastic messages
 // Based on https://github.com/meshtastic/protobufs
 
+export { formatNodeId, parseNodeId } from '../shared/node-id.js';
+
 // Wire types
 const VARINT = 0;
 const FIXED64 = 1;
