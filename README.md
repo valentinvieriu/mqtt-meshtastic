@@ -25,6 +25,35 @@ npm run dev
 
 Open `http://localhost:3000` in your browser.
 
+## Docker
+
+Pull the pre-built image from GitHub Container Registry:
+
+```bash
+docker pull ghcr.io/valentinvieriu/mqtt-meshtastic:latest
+```
+
+Run with default settings:
+
+```bash
+docker run --rm -p 3000:3000 -p 8080:8080 ghcr.io/valentinvieriu/mqtt-meshtastic:latest
+```
+
+Or with a `.env` file for custom configuration:
+
+```bash
+docker run --rm -p 3000:3000 -p 8080:8080 --env-file .env ghcr.io/valentinvieriu/mqtt-meshtastic:latest
+```
+
+Using Docker Compose:
+
+```bash
+cp .env.example .env   # edit as needed
+docker compose up -d
+```
+
+The image supports `linux/amd64` and `linux/arm64`.
+
 ## Configuration
 
 Copy `.env.example` to `.env` and adjust values:
