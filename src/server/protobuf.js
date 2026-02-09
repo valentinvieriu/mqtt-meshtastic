@@ -93,6 +93,10 @@ class ProtoReader {
     return result >>> 0;
   }
 
+  readInt32Varint() {
+    return this.readVarint() | 0;
+  }
+
   // Read varint as BigInt for 64-bit values
   readVarint64() {
     let result = 0n;
@@ -390,8 +394,7 @@ export function decodeMeshPacket(buffer, options = {}) {
           reader.readVarint();
           break;
         case 12: { // rx_rssi (varint, signed)
-          const v = reader.readVarint();
-          result.rxRssi = (v | 0);
+          result.rxRssi = reader.readInt32Varint();
           break;
         }
         case 13: // delayed (varint enum)
@@ -568,7 +571,7 @@ export function decodePosition(buffer) {
           reader.pos += 4;
           break;
         case 3: // altitude (int32)
-          result.altitude = reader.readVarint();
+          result.altitude = reader.readInt32Varint();
           break;
         case 4: // time (fixed32)
           result.time = reader.readFixed32();
@@ -1068,7 +1071,7 @@ export function decodeMapReport(buffer) {
           reader.pos += 4;
           break;
         case 11: // altitude
-          result.altitude = reader.readVarint();
+          result.altitude = reader.readInt32Varint();
           break;
         case 12: // position_precision
           result.positionPrecision = reader.readVarint();
