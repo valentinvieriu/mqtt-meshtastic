@@ -4,7 +4,6 @@ import { createMqttClient } from './mqtt-client.js';
 import { config } from './config.js';
 import { createMqttMessageHandler } from './mqtt-handlers.js';
 import { createWsHandlers } from './ws-handlers.js';
-import { rememberChannelKey } from './packet-decoder.js';
 
 // Track connected WebSocket clients
 const wsClients = new Set();
@@ -43,7 +42,6 @@ const wsHandlers = createWsHandlers({
   mqttClient,
   broadcast,
   wsClients,
-  rememberChannelKey,
 });
 
 wsServer.on('connection', wsHandlers.handleConnection);

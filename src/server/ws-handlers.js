@@ -2,6 +2,7 @@ import { encrypt, generatePacketId, generateChannelHash } from './crypto.js';
 import { config } from './config.js';
 import { encodeServiceEnvelope, encodeData, PortNum } from './protobuf.js';
 import { parseNodeId, formatNodeId } from '../shared/node-id.js';
+import { rememberChannelKey } from './packet-decoder.js';
 
 function buildTopic({ root, region, path, channel, gatewayId }) {
   return `${root}/${region}/${path}/${channel}/${gatewayId}`;
@@ -17,7 +18,7 @@ async function publishProtobufMessage(mqttClient, ws, {
   to,
   text,
   key,
-}, rememberChannelKey) {
+}) {
   const fromNode = parseNodeId(from || gatewayId);
   const toNode = parseNodeId(to);
   const packetId = generatePacketId();
@@ -108,7 +109,7 @@ async function publishJsonMessage(mqttClient, ws, { root, region, channel, gatew
   }));
 }
 
-async function handleClientMessage(mqttClient, ws, msg, broadcast, rememberChannelKey) {
+async function handleClientMessage(mqttClient, ws, msg, broadcast) {
   switch (msg.type) {
     case 'publish': {
       // Extract parameters with defaults for backward compatibility
@@ -131,8 +132,7 @@ async function handleClientMessage(mqttClient, ws, msg, broadcast, rememberChann
         await publishProtobufMessage(
           mqttClient,
           ws,
-          { root, region, path, channel, gatewayId, from, to, text, key },
-          rememberChannelKey
+          { root, region, path, channel, gatewayId, from, to, text, key }
         );
       }
       break;
@@ -166,7 +166,7 @@ async function handleClientMessage(mqttClient, ws, msg, broadcast, rememberChann
   }
 }
 
-export function createWsHandlers({ mqttClient, broadcast, wsClients, rememberChannelKey }) {
+export function createWsHandlers({ mqttClient, broadcast, wsClients }) {
   function handleConnection(ws) {
     console.log('[WS] Client connected');
     wsClients.add(ws);
@@ -186,7 +186,7 @@ export function createWsHandlers({ mqttClient, broadcast, wsClients, rememberCha
     ws.on('message', async (data) => {
       try {
         const msg = JSON.parse(data.toString());
-        await handleClientMessage(mqttClient, ws, msg, broadcast, rememberChannelKey);
+        await handleClientMessage(mqttClient, ws, msg, broadcast);
       } catch (err) {
         console.error('[WS] Error handling message:', err);
         ws.send(JSON.stringify({ type: 'error', message: err.message }));
