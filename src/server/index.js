@@ -16,9 +16,8 @@ import {
   decodeTraceroute,
   decodeMapReport,
   PortNum,
-  parseNodeId,
-  formatNodeId,
 } from './protobuf.js';
+import { parseNodeId, formatNodeId } from '../shared/node-id.js';
 
 // Derive port names from PortNum enum (single source of truth)
 const PORT_NAMES = Object.fromEntries(
